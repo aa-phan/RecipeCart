@@ -1,0 +1,32 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# local data (SQLite, temp media, encrypted H-E-B session state)
+data/
+spikes/tmp/
+
+# OS
+.DS_Store
+
+# logs
+*.log
+npm-debug.log*
+
+# editor
+.vscode/
+.idea/
+
+# claude code local settings
+.claude/settings.local.json
+
+# leftover source archive
+files.zip

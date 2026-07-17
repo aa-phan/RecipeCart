@@ -1,0 +1,44 @@
+{
+  "name": "recipecart",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TikTok Recipe -> H-E-B Cart Automation (RecipeCart) — Phase 0/1 barebones local pipeline",
+  "type": "module",
+  "bin": {
+    "recipecart": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "cli": "tsx src/cli.ts",
+    "spike:tiktok": "tsx spikes/tiktok-media-spike.ts",
+    "spike:heb": "tsx spikes/heb-automation-spike.ts",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@google-cloud/vision": "^5.3.7",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "openai": "^4.104.0",
+    "playwright": "^1.48.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.12.0",
+    "@types/node": "^22.7.5",
+    "@typescript-eslint/eslint-plugin": "^8.8.1",
+    "@typescript-eslint/parser": "^8.8.1",
+    "eslint": "^9.12.0",
+    "eslint-config-prettier": "^9.1.0",
+    "globals": "^17.7.0",
+    "prettier": "^3.3.3",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.10"
+  }
+}
