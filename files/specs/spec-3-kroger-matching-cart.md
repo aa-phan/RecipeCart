@@ -264,12 +264,17 @@ pursued for this product). This removes the "fresh `read_cart()` before mutating
 
 1. Pre-flight: confirm the stored access token is valid, refresh via `refresh_token`
    if near/past expiry — replaces `get_session_status()`.
-2. `add_to_cart()` per approved item, sequential. **The API response itself is the
-   confirmation signal**: `204 No Content` = accepted by Kroger; any other status
-   carries a specific error reason. This is arguably a *stronger* per-call signal
-   than the original design's DOM-based read-after-write, which existed specifically
-   because "no error thrown" wasn't trustworthy on its own — here the "no error" *is*
-   Kroger's own API contract.
+2. `add_to_cart()` per approved item, sequential. **The API response is A
+   confirmation signal, but NOT a fulfillment guarantee** — `204 No Content` = Kroger
+   accepted the write; any other status carries a specific error reason. **Live-found
+   caveat (2026-07-18):** a paprika UPC got a clean 204 accept, and Kroger's own
+   Products search API still reports it `stockLevel: HIGH` / fully fulfillable right
+   now — yet it showed as out-of-stock in the real cart. Kroger's fulfillment-time
+   stock check evidently differs from both the search-time and write-time signals,
+   and the write-only Cart API exposes no way to detect this at add time. The 204
+   signal is real (stronger than "no error thrown" was in the original DOM-based
+   design), just not as strong as originally documented here — it confirms Kroger
+   *accepted the request*, not that the item will actually be fulfillable.
 3. **No duplicate-in-cart detection is possible via API read at this tier.** Mitigated
    by: (a) idempotency key still prevents the same approval event from re-submitting
    on retry (Spec 4 §Idempotency) — this covers the case the original design's fresh
@@ -277,8 +282,14 @@ pursued for this product). This removes the "fresh `read_cart()` before mutating
    state in the Kroger app directly. A duplicate add from two *different* approval
    events (e.g. re-approving a recipe) is accepted as a known, minor limitation of the
    Public tier — flagged for revisit if it proves to be a real problem (§6).
-4. Per-item transient retry (small cap); permanent failures (out of stock, invalid
-   productId, rate limit hit) → `needs_attention` with reason, no auto-retry.
+4. Per-item transient retry (small cap); when Kroger actually REJECTS an add (a
+   detectable failure — out of stock, invalid productId, etc.), **the next-ranked
+   match candidate is tried automatically** (`ApprovedCartItem.fallbacks`,
+   `cart_runner.ts`'s `addItemWithFallback`) before falling through to
+   `needs_attention`. Stops immediately on a 401 (auth failure) without burning
+   fallback attempts — that's a connection problem, not a product problem. Does
+   **not** help the point-2 silent-accept case, since there's no rejection to react
+   to; only the detectable-rejection case has a fallback path today.
 5. Terminal states: `completed` | `partially_completed` (first-class, itemized) |
    `failed` | `requires_user_intervention` (token expired/revoked — resumable via
    re-authorization, re-attempts only remaining items `[P2]`).

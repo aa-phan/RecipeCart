@@ -121,7 +121,11 @@ interface ProductMatchRow {
  * (`candidate.quantityToOrder` — Spec 3 §2.2 step 3, "closest-over"
  * generalized across multiple packages when one alone doesn't cover the
  * ingredient's needed amount), defaulting to 1 for older persisted matches
- * that predate the field. */
+ * that predate the field. The rest of the ranked candidate list rides along
+ * as `fallbacks` so cart_runner.ts can automatically try the next-best match
+ * if Kroger actually rejects the top pick at add time (it can't help with a
+ * silent accept-then-later-unavailable case — see cart_runner.ts's module
+ * doc for why). */
 function selectApprovedItems(recipeId: string): {
   approved: ApprovedCartItem[];
   skipped: { name: string; reason: string }[];
@@ -151,10 +155,14 @@ function selectApprovedItems(recipeId: string): {
       skipped.push({ name, reason: "no candidates found" });
       continue;
     }
+    const fallbacks = candidates
+      .slice(1)
+      .map((c) => ({ upc: c.upc, quantity: c.quantityToOrder ?? 1 }));
     approved.push({
       upc: top.upc,
       quantity: top.quantityToOrder ?? 1,
       ingredientId: row.ingredient_id,
+      ...(fallbacks.length > 0 ? { fallbacks } : {}),
     });
   }
 

@@ -202,6 +202,88 @@ describe("runCartApproval", () => {
     ]);
   });
 
+  it("tries the next fallback candidate when Kroger rejects the top pick", async () => {
+    addToCartMock
+      .mockResolvedValueOnce({ ok: false, status: 404, reason: { error: "product_not_found" } })
+      .mockResolvedValueOnce({ ok: true });
+
+    const result = await runCartApproval(
+      "recipe-1",
+      [
+        {
+          upc: "rejected-upc",
+          quantity: 1,
+          ingredientId: "ing-1",
+          fallbacks: [{ upc: "fallback-upc", quantity: 2 }],
+        },
+      ],
+      "idem-key-fallback-1",
+    );
+
+    expect(result.status).toBe("completed");
+    expect(addToCartMock).toHaveBeenCalledTimes(2);
+    expect(addToCartMock).toHaveBeenNthCalledWith(1, "rejected-upc", 1, "valid-access-token");
+    expect(addToCartMock).toHaveBeenNthCalledWith(2, "fallback-upc", 2, "valid-access-token");
+    expect(result.results).toEqual([
+      {
+        ingredientId: "ing-1",
+        upc: "fallback-upc",
+        status: "added",
+        reason: expect.stringContaining("fallback candidate used"),
+      },
+    ]);
+  });
+
+  it("needs_attention with an aggregated reason when every candidate (top + all fallbacks) is rejected", async () => {
+    addToCartMock
+      .mockResolvedValueOnce({ ok: false, status: 404, reason: { error: "not_found" } })
+      .mockResolvedValueOnce({ ok: false, status: 400, reason: { error: "invalid" } });
+
+    const result = await runCartApproval(
+      "recipe-1",
+      [
+        {
+          upc: "top",
+          quantity: 1,
+          ingredientId: "ing-1",
+          fallbacks: [{ upc: "second", quantity: 1 }],
+        },
+      ],
+      "idem-key-fallback-2",
+    );
+
+    expect(result.status).toBe("failed");
+    expect(addToCartMock).toHaveBeenCalledTimes(2);
+    expect(result.results).toEqual([
+      {
+        ingredientId: "ing-1",
+        upc: "top",
+        status: "needs_attention",
+        reason: expect.stringContaining("all 2 candidates rejected"),
+      },
+    ]);
+  });
+
+  it("stops at auth_failure without trying fallback candidates", async () => {
+    addToCartMock.mockResolvedValueOnce({ ok: false, status: 401, reason: { error: "unauthorized" } });
+
+    const result = await runCartApproval(
+      "recipe-1",
+      [
+        {
+          upc: "top",
+          quantity: 1,
+          fallbacks: [{ upc: "second", quantity: 1 }],
+        },
+      ],
+      "idem-key-fallback-3",
+    );
+
+    expect(result.status).toBe("requires_user_intervention");
+    // Only the first attempt — a 401 must not trigger a fallback retry.
+    expect(addToCartMock).toHaveBeenCalledTimes(1);
+  });
+
   it("all items fail (non-401) -> failed", async () => {
     addToCartMock.mockResolvedValue({ ok: false, status: 400, reason: { error: "bad_request" } });
 
