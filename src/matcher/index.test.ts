@@ -458,32 +458,35 @@ describe("matchIngredient", () => {
     expect(result.approvalReason).toMatch(/network down/);
   });
 
-  it("defaults to the smallest package (cheapest tiebreak) and skips approval when no quantity is stated", async () => {
+  it("defaults to the cheapest well-matched product (NOT the physically smallest) when no quantity is stated", async () => {
+    // The physically larger package is cheaper — cheapest-price must win,
+    // proving the default is price-driven, not smallest-size-driven (which
+    // previously picked absurd tiny specialty items).
     (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: [
         product({
-          productId: "big",
-          upc: "big",
+          productId: "big-cheap",
+          upc: "big-cheap",
           description: "Kroger Heavy Whipping Cream (Large)",
           items: [
             {
               itemId: "1",
               fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
-              price: { regular: 5.99 },
+              price: { regular: 3.49 },
               size: "32 fl oz",
               soldBy: "UNIT",
             },
           ],
         }),
         product({
-          productId: "small",
-          upc: "small",
+          productId: "small-pricey",
+          upc: "small-pricey",
           description: "Kroger Heavy Whipping Cream (Small)",
           items: [
             {
               itemId: "2",
               fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
-              price: { regular: 3.49 },
+              price: { regular: 5.99 },
               size: "8 fl oz",
               soldBy: "UNIT",
             },
@@ -501,11 +504,151 @@ describe("matchIngredient", () => {
     );
 
     expect(result.requiresApproval).toBe(false);
-    expect(result.candidates[0]!.productId).toBe("small");
+    expect(result.candidates[0]!.productId).toBe("big-cheap");
     expect(result.candidates[0]!.reason).toMatch(/no quantity stated/);
   });
 
-  it("treats a known seasoning as smallest-package-default even with a real stated quantity", async () => {
+  it("excludes items that are out of stock or have no available fulfillment method", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "nofulfill",
+          upc: "nofulfill",
+          description: "Kroger Heavy Whipping Cream (No Fulfillment)",
+          items: [
+            {
+              itemId: "1",
+              inventory: { stockLevel: "HIGH" },
+              // all four false — reported in stock, but not orderable anywhere
+              fulfillment: { curbside: false, delivery: false, inStore: false, shipToHome: false },
+              price: { regular: 1.99 },
+              size: "16 fl oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+        product({
+          productId: "orderable",
+          upc: "orderable",
+          description: "Kroger Heavy Whipping Cream",
+          items: [
+            {
+              itemId: "2",
+              fulfillment: { curbside: true, delivery: false, inStore: false, shipToHome: false },
+              price: { regular: 3.49 },
+              size: "16 fl oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({ quantity: { value: null, unit: null, raw_text: "a splash" } }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+
+    // The cheaper no-fulfillment item must not win — or even appear.
+    expect(result.candidates.map((c) => c.productId)).toEqual(["orderable"]);
+  });
+
+  it("prefers a plain product over a prepared/pre-flavored one of the same base ingredient", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "seasoned",
+          upc: "seasoned",
+          description: "El Rey Achiote Seasoned Boneless Chicken Thighs",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 3.0 }, // cheaper — must still lose to the plain one
+              size: "1 lb",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+        product({
+          productId: "plain",
+          upc: "plain",
+          description: "Kroger Frozen Raw Boneless Skinless Chicken Thighs",
+          items: [
+            {
+              itemId: "2",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 3.99 },
+              size: "3 lb",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: {
+          value: "boneless chicken thighs",
+          evidence: [{ source_type: "caption" }],
+        },
+        raw_text: "800g boneless chicken thighs",
+        quantity: { value: 800, unit: "g", raw_text: "800g" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+    expect(result.candidates[0]!.productId).toBe("plain");
+  });
+
+  it("orders one variable-weight package (qty 1) for a WEIGHT-sold item instead of multiplying its price-basis size", async () => {
+    // "1 lb" on a WEIGHT-sold item is a price-per-lb basis, not the package
+    // size — must NOT become "buy 2" of an 800g need.
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "weightcut",
+          upc: "weightcut",
+          description: "Heritage Farm Boneless Skinless Chicken Breasts",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 2.69 },
+              size: "1 lb",
+              soldBy: "WEIGHT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 1 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: { value: "chicken breast", evidence: [{ source_type: "caption" }] },
+        raw_text: "800g chicken breast",
+        quantity: { value: 800, unit: "g", raw_text: "800g" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+    expect(result.requiresApproval).toBe(false);
+    expect(result.candidates[0]!.quantityToOrder).toBe(1);
+    expect(result.candidates[0]!.reason).toMatch(/sold by weight/);
+  });
+
+  it("routes a known seasoning to the cheapest well-matched product even with a real stated quantity", async () => {
+    // The physically LARGER pack ("big", 48oz) is the cheapest — it must win
+    // for a seasoning, proving seasonings default to cheapest price, not
+    // smallest package (which previously picked tiny specialty items).
     (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: [
         product({
@@ -516,22 +659,22 @@ describe("matchIngredient", () => {
             {
               itemId: "1",
               fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
-              price: { regular: 3.29 },
+              price: { regular: 0.99 },
               size: "48 oz",
               soldBy: "UNIT",
             },
           ],
         }),
         product({
-          productId: "small",
-          upc: "small",
+          productId: "small-specialty",
+          upc: "small-specialty",
           description: "Kroger Iodized Salt (Small)",
           items: [
             {
               itemId: "2",
               fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
-              price: { regular: 0.99 },
-              size: "26 oz",
+              price: { regular: 3.29 },
+              size: "1.75 oz",
               soldBy: "UNIT",
             },
           ],
@@ -552,7 +695,7 @@ describe("matchIngredient", () => {
     );
 
     expect(result.requiresApproval).toBe(false);
-    expect(result.candidates[0]!.productId).toBe("small");
+    expect(result.candidates[0]!.productId).toBe("big");
     expect(result.candidates[0]!.reason).toMatch(/seasoning/);
   });
 });

@@ -194,19 +194,3 @@ export function computeUnitPrice(price: number, size: string): number | undefine
   if (!parsed || parsed.baseQuantity <= 0) return undefined;
   return price / parsed.baseQuantity;
 }
-
-/** Package-size magnitude for the no-stated-quantity default rule (Spec 3
- * §2.2 step 3a): when an ingredient has no quantity at all, there is no
- * quantity-to-fit, so smallest-package-first is the deterministic
- * fallback — deliberately no cross-category conversion here (unlike
- * quantityFitScore above), comparing raw base quantities as-is even across
- * categories. That's a known, accepted simplification: candidate sets for
- * one ingredient search are almost always unit-homogeneous in practice
- * (spices are all sold by weight, milk/oil all by volume), so an exact
- * apples-to-apples comparison isn't worth the complexity here the way it is
- * for quantityFitScore's real quantity-fit math. Unparseable sizes sort last
- * (treated as unknown-large) rather than being excluded. */
-export function packageSizeMagnitude(size: string): number {
-  const parsed = parseSizeString(size);
-  return parsed ? parsed.baseQuantity : Infinity;
-}

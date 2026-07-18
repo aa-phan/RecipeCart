@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  computeUnitPrice,
-  packageSizeMagnitude,
-  quantityFitScore,
-  textRelevanceScore,
-} from "./rank.js";
+import { computeUnitPrice, quantityFitScore, textRelevanceScore } from "./rank.js";
 
 describe("textRelevanceScore", () => {
   it("scores full-phrase matches highly", () => {
@@ -115,20 +110,6 @@ describe("quantityFitScore", () => {
       const fit = quantityFitScore({ value: 3, unit: "tsp", raw_text: "3 tsp" }, "26 oz", "salt");
       expect(fit).toBeNull();
     });
-  });
-});
-
-describe("packageSizeMagnitude", () => {
-  it("returns the parsed base quantity for a parseable size", () => {
-    expect(packageSizeMagnitude("1 lb")).toBeCloseTo(453.592, 2);
-  });
-
-  it("orders smaller packages before larger ones within the same category", () => {
-    expect(packageSizeMagnitude("2 oz")).toBeLessThan(packageSizeMagnitude("9.25 oz"));
-  });
-
-  it("treats an unparseable size as unknown-large (sorts last)", () => {
-    expect(packageSizeMagnitude("assorted")).toBe(Infinity);
   });
 });
 

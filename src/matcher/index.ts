@@ -8,11 +8,11 @@ import { randomUUID } from "node:crypto";
 import type { Ingredient } from "../pipeline/schema.js";
 import { getAppToken } from "../kroger/auth.js";
 import { searchProducts } from "../kroger/client.js";
+import type { KrogerProductItem } from "../kroger/types.js";
 import { getDb } from "../platform/db.js";
 import { logger } from "../platform/logger.js";
 import {
   computeUnitPrice,
-  packageSizeMagnitude,
   quantityFitScore,
   textRelevanceScore,
   type QuantityFit,
@@ -39,6 +39,79 @@ const MAX_CANDIDATES = 5;
 // got wrongly flagged requires_approval as "no package covers the need."
 const SEARCH_LIMIT = 50;
 
+/** An item is only a real candidate if it can actually be obtained. Kroger's
+ * Products API signals this two ways, BOTH of which have to pass — found
+ * live (2026-07-18) that items failing either still get returned by search
+ * and were being added to real carts as "unavailable":
+ *   - inventory.stockLevel !== TEMPORARILY_OUT_OF_STOCK (when reported at
+ *     all; frequently null, which is NOT treated as out-of-stock on its own).
+ *   - at least one fulfillment method (curbside/delivery/inStore/shipToHome)
+ *     is true. An item with all four false cannot be ordered through ANY
+ *     channel — e.g. a "Philadelphia Garlic & Herb Cream Cheese" that
+ *     reported stockLevel HIGH but every fulfillment flag false, and showed
+ *     up in the cart as unavailable. */
+function isOrderable(item: KrogerProductItem): boolean {
+  if (item.inventory?.stockLevel === "TEMPORARILY_OUT_OF_STOCK") return false;
+  const f = item.fulfillment;
+  return f.curbside || f.delivery || f.inStore || f.shipToHome;
+}
+
+// Words that mark a product as PREPARED/pre-flavored rather than the plain
+// raw ingredient a recipe calls for. When one of these appears in a
+// candidate's description but NOT in the ingredient's own name, the
+// candidate is penalized (not excluded) so a plain product wins when one
+// exists, but a prepared product can still surface (flagged) as a last
+// resort. Found live: "El Rey Achiote SEASONED Boneless Chicken Thighs" and
+// "Sea Salt & Cracked Black Pepper ROASTED Frozen Redskin Potatoes" were
+// winning over plain raw versions purely on package-fit math. "frozen" is
+// deliberately NOT here — frozen raw chicken/veg is a fine plain match.
+const PREPARED_KEYWORDS = [
+  // prepared / pre-flavored
+  "seasoned",
+  "marinated",
+  "roasted",
+  "grilled",
+  "breaded",
+  "fried",
+  "smoked",
+  "glazed",
+  "flavored",
+  "achiote",
+  "teriyaki",
+  "bbq",
+  "barbecue",
+  "buffalo",
+  "rotisserie",
+  "cracked black pepper",
+  "rinds",
+];
+// NOTE: deliberately NOT including form words like "ground"/"shaved"/"deli"
+// here. They tried to keep whole raw cuts ahead of processed forms (ground
+// chicken breast, deli/shaved meat), but that job is already done by the
+// soldBy=WEIGHT handling below (whole raw meat/produce is weight-sold and
+// competes as a qty-1 covering package) and by text relevance ("shaved
+// chicken" lacks the word "breast" and scores low on its own). Worse,
+// "ground" misfires on spices — "ground paprika"/"ground cumin" are the
+// normal, correct product, not a downgrade — so penalizing it picked a
+// pricier non-ground paprika over the right one.
+const PREPARED_PENALTY = 0.6;
+
+/** Penalty to subtract from a candidate's text-relevance score when its
+ * description looks like a prepared/pre-flavored product but the ingredient
+ * name doesn't ask for that (e.g. plain "chicken breast" vs "achiote
+ * seasoned chicken breast"). 0 when the ingredient itself contains the
+ * keyword (so "italian seasoning" isn't penalized for the word "seasoned").
+ * Deliberately a penalty, not an exclusion — keeps prepared items available
+ * as a flagged last resort when nothing plainer exists. */
+function preparedPenalty(scoringName: string, description: string): number {
+  const desc = description.toLowerCase();
+  const name = scoringName.toLowerCase();
+  for (const kw of PREPARED_KEYWORDS) {
+    if (desc.includes(kw) && !name.includes(kw)) return PREPARED_PENALTY;
+  }
+  return 0;
+}
+
 function compareCandidates(a: ProductCandidate, b: ProductCandidate): number {
   const diff = b.rankScore - a.rankScore;
   if (Math.abs(diff) > 0.01) return diff;
@@ -46,15 +119,24 @@ function compareCandidates(a: ProductCandidate, b: ProductCandidate): number {
   return diff;
 }
 
-/** No-stated-quantity default ordering (Spec 3 §2.2 step 3a): smallest
- * package first, cheapest price as the tiebreak — an arbitrary but
- * deterministic choice, not a quality judgment (an "organic" or other
- * preference-based tiebreak is a natural P3 extension once Spec 1
- * preferences exist to drive it). */
-function compareBySmallestPackage(a: ProductCandidate, b: ProductCandidate): number {
-  const diff = packageSizeMagnitude(a.size) - packageSizeMagnitude(b.size);
-  if (diff !== 0) return diff;
-  if (a.price != null && b.price != null) return a.price - b.price;
+/** No-stated-quantity / seasoning default ordering (Spec 3 §2.2 step 3a):
+ * best NAME match first (a clearly better-matched product always wins —
+ * RELEVANCE_GAP_THRESHOLD), then cheapest total price. Replaced an earlier
+ * "physically smallest package" rule that, live, picked absurd specialty
+ * items — e.g. a tiny 1.75oz "Florida Pure Sea Salt" ($8.99) over "Kroger®
+ * Salt" 26oz ($0.99) purely because 1.75oz is a smaller number, and a
+ * "Parmigiano Reggiano Rinds" (size "1 ct", magnitude 1) over real grated
+ * parmesan because a bare count compared as smaller than any weight. Cheapest
+ * price is both more sensible ("I just need some salt") and naturally avoids
+ * those specialty-priced outliers. */
+function compareByRelevanceThenPrice(a: ScoredCandidate, b: ScoredCandidate): number {
+  const relevanceDiff = b.textScore - a.textScore;
+  if (Math.abs(relevanceDiff) >= RELEVANCE_GAP_THRESHOLD) return relevanceDiff;
+  const pa = a.candidate.price;
+  const pb = b.candidate.price;
+  if (pa != null && pb != null) return pa - pb;
+  if (pa != null) return -1;
+  if (pb != null) return 1;
   return 0;
 }
 
@@ -138,15 +220,39 @@ async function searchAndBuildCandidates(
   for (const product of response.data) {
     if (requiredWord && !product.description.toLowerCase().includes(requiredWord)) continue;
 
-    const textScore = textRelevanceScore(scoringName, product.description);
-    if (textScore === null) continue; // no meaningful overlap — excluded, not just penalized
+    const rawTextScore = textRelevanceScore(scoringName, product.description);
+    if (rawTextScore === null) continue; // no meaningful overlap — excluded, not just penalized
+    // Down-weight prepared/pre-flavored products so a plain raw match wins
+    // when one exists (kept, not excluded — see preparedPenalty). Floored
+    // just above 0 so a penalized-but-only candidate still survives the
+    // null-exclusion gate above rather than vanishing entirely.
+    const textScore = Math.max(0.01, rawTextScore - preparedPenalty(scoringName, product.description));
 
     for (const item of product.items) {
-      if (item.inventory?.stockLevel === "TEMPORARILY_OUT_OF_STOCK") continue;
+      if (!isOrderable(item)) continue;
 
-      const qFit = useSmallestPackageDefault
-        ? null
-        : quantityFitScore(quantity, item.size, scoringName);
+      // A WEIGHT-sold item's `size` (e.g. "1 lb") is a price-per-unit basis,
+      // NOT the package size — package-count coverage math is meaningless for
+      // it (this is what produced the nonsensical "buy 2" of a ~5lb
+      // variable-weight chicken breast pack for an 800g need). Model it as
+      // what it actually is: one variable-weight package, ordered as
+      // quantity 1, which for a normal recipe amount over-covers. Treated as
+      // a valid covering fit at qty 1 so plain meat/produce sold by weight
+      // competes on equal footing with UNIT-packaged (often more processed)
+      // forms, rather than being dropped below them.
+      let qFit: QuantityFit | null;
+      if (useSmallestPackageDefault) {
+        qFit = null;
+      } else if (item.soldBy === "WEIGHT") {
+        qFit = {
+          score: 1,
+          covers: true,
+          unitsNeeded: 1,
+          note: "sold by weight — 1 package (variable weight, set at pickup)",
+        };
+      } else {
+        qFit = quantityFitScore(quantity, item.size, scoringName);
+      }
       const price = item.price?.regular ?? null;
       const unitPrice = price != null ? computeUnitPrice(price, item.size) : undefined;
       const rankScore = textScore * 10 + (qFit ? qFit.score * 3 : 0);
@@ -337,7 +443,7 @@ export async function matchIngredient(
   const useQuantityCoverage = !useSmallestPackageDefault && hasUsableQuantityFit;
 
   if (useSmallestPackageDefault) {
-    scored.sort((a, b) => compareBySmallestPackage(a.candidate, b.candidate));
+    scored.sort(compareByRelevanceThenPrice);
   } else if (useQuantityCoverage) {
     scored.sort(compareByQuantityCoverage);
   } else {
@@ -353,11 +459,11 @@ export async function matchIngredient(
     requiresApproval = true;
     approvalReason = "no in-stock candidates found a relevant text match for this ingredient";
   } else if (useSmallestPackageDefault) {
-    // Deterministic by construction (smallest package, cheapest tiebreak) —
+    // Deterministic by construction (best name match, cheapest tiebreak) —
     // never flagged as ambiguous just because there was nothing to score.
     candidates[0]!.reason = hasQuantity
-      ? "small seasoning amount — smallest package selected regardless of stated quantity"
-      : "no quantity stated — smallest package selected";
+      ? "small seasoning amount — cheapest well-matched product selected regardless of stated quantity"
+      : "no quantity stated — cheapest well-matched product selected";
   } else if (useQuantityCoverage) {
     // "Convert to the package's unit, then pick the smallest size (or
     // smallest number of packages) that fully covers the needed quantity"

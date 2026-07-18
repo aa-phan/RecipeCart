@@ -85,18 +85,22 @@ Unchanged from the original design — this logic was always retailer-agnostic:
    count).
 2. `search_products()` against the active `locationId`, requesting Kroger's actual
    max page size (`filter.limit=50` — confirmed live: the API hard-rejects anything
-   above 50, `PRODUCT-2013`); **exclude** out-of-stock outright (Kroger's `stockLevel`
-   field: `HIGH` | `LOW` | `TEMPORARILY_OUT_OF_STOCK`). **Found via live testing: a
-   smaller page size (previously 10) silently truncates the response before ranking
-   ever runs** — a real covering package for "chicken breast" (3 lb) only appeared
-   past position 10 in Kroger's own relevance ordering, so the matcher never saw it
-   and wrongly flagged the ingredient `requires_approval` as "no package covers the
-   need," when a covering package was genuinely in stock. Not every `requires_approval`
-   case is this — some are real: e.g. "garlic & herb cream cheese" at 250g needed had
-   no in-stock single package ≥8oz across every reasonable query phrasing tried live,
-   at any store search-term variant — Kroger genuinely doesn't carry a large-enough
-   package of that specific product at this store, which is correctly a case for human
-   judgment (buy 2, or substitute), not a search-semantics bug.
+   above 50, `PRODUCT-2013`). **Found via live testing: a smaller page size
+   (previously 10) silently truncates the response before ranking ever runs** — a real
+   covering package for "chicken breast" (3 lb) only appeared past position 10 in
+   Kroger's own relevance ordering, so the matcher never saw it and wrongly flagged the
+   ingredient `requires_approval`.
+2b. **Orderability filter — `isOrderable()`, both conditions required.** An item is
+   only a candidate if it is (a) not `TEMPORARILY_OUT_OF_STOCK` (when `inventory` is
+   reported at all — it's frequently null, which is NOT treated as out-of-stock on its
+   own) AND (b) has at least one `fulfillment` method true
+   (curbside/delivery/inStore/shipToHome). **Found live, after a real cart add:** five
+   selected items came back as "unavailable" in the actual cart. The clearest culprit —
+   a "Philadelphia Garlic & Herb Cream Cheese" reporting `stockLevel: HIGH` but **all
+   four fulfillment flags false** — is not orderable through any channel, yet the old
+   code only checked `stockLevel` and added it. Requiring a live fulfillment method
+   fixes that class outright. (Kroger's Products API availability signalling is
+   imperfect; this is the strongest orderability signal it exposes, not a guarantee.)
 2a. **One-step broadened fallback search**, only when a core (non-seasoning, quantified)
    ingredient's specific-name search found no in-stock covering package: drop the last
    word of the canonical name (e.g. "garlic & herb cream cheese" → "garlic & herb
@@ -146,8 +150,10 @@ Unchanged from the original design — this logic was always retailer-agnostic:
    ingredient (that P1 limitation is resolved; `addToCart`'s `quantity` param was
    already wired end-to-end, just never populated with anything but 1).
    `quantityFitScore` (rank.ts) now generalizes "closest-over" across N units of
-   the same package — 800g of chicken breast from 1lb packages just means buying
-   2 (113% of need), the normal outcome, not a failure to match. Capped at
+   the same UNIT-sold package — e.g. a 1600g potato need from 20oz bags just means
+   buying 3, the normal outcome, not a failure to match (note: this applies to
+   fixed-`soldBy: UNIT` packages only — variable-weight items are handled by 3c).
+   Capped at
    `MAX_AUTO_MULTI_UNIT_PURCHASE` (3): past that (or when even that many units of
    the best candidate still can't reach the need), it's not auto-resolved — still
    reported with the real unit count, but flagged `requires_approval` rather than
@@ -162,15 +168,41 @@ Unchanged from the original design — this logic was always retailer-agnostic:
    `RELEVANCE_GAP_THRESHOLD` (0.2) now wins outright before fit-tightness or price
    ever get a vote — a candidate whose name is a clearly worse match for the
    ingredient can't win just because its package math is numerically tighter.
-   **Known, disclosed remaining gap:** this can't tell "raw potatoes" from
-   "Sea Salt & Cracked Black Pepper Roasted FROZEN Redskin Potatoes" — both
-   literally contain the word "potatoes" and score identically on text relevance
-   (which only measures token overlap, not preparation state), so a single-word
-   ingredient name with no other distinguishing tokens still falls through to
-   fit-tightness/price, and a prepared/seasoned/frozen product can still win over
-   a raw one there. Not fixed here — a real, live-confirmed gap worth a future
-   pass (e.g. a small "prepared-food" keyword penalty), not something to assume
-   solved.
+   The raw-vs-prepared gap this note originally flagged (e.g. plain potatoes vs a
+   "Roasted Redskin Potatoes" side) is now largely addressed by the prepared-food
+   penalty in 3c — though relevance still can't distinguish products that differ
+   ONLY by a word not in the penalty list (a bare "potatoes" ingredient vs a
+   frozen "Garlic Herb Baby Potatoes" side both score full relevance), so 3c leans
+   on the `soldBy: WEIGHT` handling to keep plain produce/meat ahead there.
+3c. **Variable-weight items, prepared-food penalty, and cheapest-price default —
+   all three from a real cart add's fallout.** After a live `approve` put 20 items
+   in a real cart, five were unavailable (fixed by 2b) and several were the wrong
+   product; three coordinated ranking fixes:
+   - **`soldBy: WEIGHT` items.** Kroger returns `size: "1 lb"` on weight-sold items
+     as a *price-per-lb basis*, not a package size — the old multi-package math read
+     it as a 1lb package and ordered "2" of a ~5lb variable-weight chicken breast
+     pack for an 800g need. A WEIGHT-sold item is now modelled as what it is: one
+     variable-weight package, ordered as **quantity 1** (which for a normal recipe
+     amount over-covers; exact weight is set at pickup), treated as a valid qty-1
+     covering fit so plain weight-sold meat/produce competes on equal footing with
+     UNIT-packaged (often more processed) forms instead of being dropped below them.
+   - **Prepared-food penalty (`PREPARED_KEYWORDS`).** A description containing a
+     prepared/pre-flavored word (seasoned, marinated, roasted, breaded, achiote,
+     rotisserie, "cracked black pepper", rinds, …) that the ingredient name does NOT
+     ask for subtracts from its text-relevance score, so a plain product wins when
+     one exists — but it's a penalty, not an exclusion, so a prepared product still
+     surfaces (flagged) as a last resort. Deliberately excludes FORM words like
+     "ground"/"shaved": those misfire on spices ("ground paprika" is the correct
+     product, not a downgrade), and the WEIGHT handling + plain relevance already
+     keep whole raw cuts ahead of ground/deli forms without them.
+   - **Cheapest-price default** for seasonings / no-stated-quantity ingredients
+     (§2.2 step 3a), replacing an earlier "physically smallest package" rule that
+     live picked absurd specialty items — a 1.75oz "Florida Pure Sea Salt" ($8.99)
+     over "Kroger® Salt" 26oz ($0.99), and a "Parmigiano Reggiano Rinds" (size
+     "1 ct", magnitude 1) over real grated parmesan because a bare count sorted
+     smaller than any weight. Ranking is now best-name-match first (same
+     `RELEVANCE_GAP_THRESHOLD`), then cheapest total price — both more sensible and
+     naturally free of those specialty-priced/degenerate-size outliers.
 4. Purchase-quantity math from a deterministic conversion table (volume↔fl oz/ml;
    standard densities like flour ≈120g/cup). Smallest-package-covers rule; surplus is
    normal. **Implemented (`density.ts`) as a small, explicit per-ingredient density
@@ -181,9 +213,10 @@ Unchanged from the original design — this logic was always retailer-agnostic:
    ingredients (e.g. "2 cups flour" against a package sold in lb) — an ingredient not
    on the list gets no conversion (skip the fit boost, same as an unparseable unit),
    never a guessed density.
-5. **Seasonings and no-stated-quantity ingredients both default to smallest-package
-   (§2.2 step 3a) — skip quantity-fit scoring and the ambiguity-margin check
-   entirely.** Two distinct triggers, same resulting behavior:
+5. **Seasonings and no-stated-quantity ingredients both default to the cheapest
+   well-matched product (§2.2 step 3a, refined in 3c) — skip quantity-fit scoring and
+   the ambiguity-margin check entirely.** Two distinct triggers, same resulting
+   behavior:
    - **No stated quantity** — a genuinely vague or absent amount (a vague phrase like
      "a pinch"/"to taste", or nothing stated at all) leaves nothing for
      `quantityFitScore` to score, so a text-score tie between near-identical branded
@@ -194,7 +227,7 @@ Unchanged from the original design — this logic was always retailer-agnostic:
      IS stated** ("3 tsp salt"). Unlike core ingredients, no reasonable recipe amount
      of a seasoning changes which shaker/jar to buy — quantity-fit scoring a
      seasoning is a distinction without a purchasing difference, so these are folded
-     into the same smallest-package default rather than routed through
+     into the same cheapest-well-matched default rather than routed through
      `density.ts`'s cross-category conversion at all. This was needed in practice,
      not just in theory: an end-to-end smoke test found nearly every spice-rack
      ingredient (salt, garlic powder, onion powder, paprika, chili flakes, Italian
@@ -203,14 +236,12 @@ Unchanged from the original design — this logic was always retailer-agnostic:
      conversion, which alone accounted for most of one real recipe's ingredients
      being flagged `requires_approval` for no real reason.
 
-   Both cases resolve deterministically to the **smallest available package**,
-   cheapest price as the tiebreak, with **no unit conversion attempted** (raw
-   package-size magnitude comparison only — a deliberate simplification, not a true
-   cross-category comparison, acceptable because one ingredient's candidate set is
-   almost always unit-homogeneous in practice). The specific tiebreak (price) is an
-   arbitrary, swappable choice, not a quality judgment — an "organic" or other
-   preference-based tiebreak is a natural `[P3]` extension once Spec 1 preferences
-   exist to drive it.
+   Both cases resolve deterministically to the **best name match, cheapest total
+   price as the tiebreak** (see 3c — this replaced an earlier "physically smallest
+   package" rule that picked specialty-priced/degenerate-size outliers). The final
+   price tiebreak is a swappable choice, not a quality judgment — an "organic" or
+   other preference-based tiebreak is a natural `[P3]` extension once Spec 1
+   preferences exist to drive it.
 6. Pantry staples (Spec 2 flag): matched anyway, deprioritized + pre-unchecked —
    display default, not a matching shortcut.
 
