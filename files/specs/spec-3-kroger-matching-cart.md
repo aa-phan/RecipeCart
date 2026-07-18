@@ -92,28 +92,43 @@ Unchanged from the original design — this logic was always retailer-agnostic:
 4. Purchase-quantity math from a deterministic conversion table (volume↔fl oz/ml;
    standard densities like flour ≈120g/cup). Smallest-package-covers rule; surplus is
    normal. **Implemented (`density.ts`) as a small, explicit per-ingredient density
-   list** (g/mL — salt, sugar, flour, common spices, oil, milk, etc.), used only to
-   bridge `quantityFitScore` across the volume/weight category split (e.g. "3 tsp
-   salt" against a package sold in oz) — an ingredient not on the list gets no
-   conversion (skip the fit boost, same as an unparseable unit), never a guessed
-   density. This was needed in practice, not just in theory: an end-to-end smoke test
-   found nearly every spice-rack ingredient (salt, garlic powder, onion powder,
-   paprika, chili flakes, Italian seasoning — all stated in tsp) getting zero
-   quantity-fit signal against oz-labeled packages, which alone accounted for most of
-   one real recipe's ingredients being flagged `requires_approval` for no real reason.
-5. **No-stated-quantity default (§2.2 step 3a).** Distinct from the ambiguity-margin
-   check above: an ingredient with a genuinely vague or absent quantity (a vague
-   phrase like "a pinch"/"to taste", or nothing stated at all) has nothing for
-   `quantityFitScore` to score, so a text-score tie between near-identical branded
-   options there isn't real ambiguity — it's "there's nothing to decide on" masquerading
-   as one. These ingredients skip the ambiguity-margin check entirely and are
-   deterministically resolved to the **smallest available package**, cheapest price as
-   the tiebreak, with **no unit conversion attempted** (raw package-size magnitude
-   comparison only — a deliberate simplification, not a true cross-category
-   comparison, acceptable because one ingredient's candidate set is almost always
-   unit-homogeneous in practice). The specific tiebreak (price) is an arbitrary,
-   swappable choice, not a quality judgment — an "organic" or other preference-based
-   tiebreak is a natural `[P3]` extension once Spec 1 preferences exist to drive it.
+   list, deliberately scoped to "core" bulk ingredients only** — meats, produce,
+   flour, sugar, oil, dairy, etc. — where the stated recipe amount is a real
+   purchasing decision (2 lb of chicken vs 5 lb; 2 cups of oil vs 1 tbsp). Used only
+   to bridge `quantityFitScore` across the volume/weight category split for those
+   ingredients (e.g. "2 cups flour" against a package sold in lb) — an ingredient not
+   on the list gets no conversion (skip the fit boost, same as an unparseable unit),
+   never a guessed density.
+5. **Seasonings and no-stated-quantity ingredients both default to smallest-package
+   (§2.2 step 3a) — skip quantity-fit scoring and the ambiguity-margin check
+   entirely.** Two distinct triggers, same resulting behavior:
+   - **No stated quantity** — a genuinely vague or absent amount (a vague phrase like
+     "a pinch"/"to taste", or nothing stated at all) leaves nothing for
+     `quantityFitScore` to score, so a text-score tie between near-identical branded
+     options isn't real ambiguity — it's "there's nothing to decide on" masquerading
+     as one.
+   - **Known small-quantity seasonings** (`seasonings.ts` — salt, pepper, garlic/onion
+     powder, paprika, chili flakes, dried herbs, etc.), **even when a real quantity
+     IS stated** ("3 tsp salt"). Unlike core ingredients, no reasonable recipe amount
+     of a seasoning changes which shaker/jar to buy — quantity-fit scoring a
+     seasoning is a distinction without a purchasing difference, so these are folded
+     into the same smallest-package default rather than routed through
+     `density.ts`'s cross-category conversion at all. This was needed in practice,
+     not just in theory: an end-to-end smoke test found nearly every spice-rack
+     ingredient (salt, garlic powder, onion powder, paprika, chili flakes, Italian
+     seasoning — all stated in tsp) getting zero (or negligible)
+     quantity-fit signal against oz-labeled packages even after adding density
+     conversion, which alone accounted for most of one real recipe's ingredients
+     being flagged `requires_approval` for no real reason.
+
+   Both cases resolve deterministically to the **smallest available package**,
+   cheapest price as the tiebreak, with **no unit conversion attempted** (raw
+   package-size magnitude comparison only — a deliberate simplification, not a true
+   cross-category comparison, acceptable because one ingredient's candidate set is
+   almost always unit-homogeneous in practice). The specific tiebreak (price) is an
+   arbitrary, swappable choice, not a quality judgment — an "organic" or other
+   preference-based tiebreak is a natural `[P3]` extension once Spec 1 preferences
+   exist to drive it.
 6. Pantry staples (Spec 2 flag): matched anyway, deprioritized + pre-unchecked —
    display default, not a matching shortcut.
 

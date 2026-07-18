@@ -62,30 +62,42 @@ describe("quantityFitScore", () => {
     expect(fit).not.toBeNull();
   });
 
-  describe("cross-category density conversion", () => {
+  describe("cross-category density conversion (core/bulk ingredients only)", () => {
     it("converts a volume quantity to weight via a known ingredient density", () => {
-      // 3 tsp salt ~= 3 * 4.92892 mL * 1.2 g/mL ~= 17.7g, well under a 26oz (737g) package.
-      const fit = quantityFitScore({ value: 3, unit: "tsp", raw_text: "3 tsp" }, "26 oz", "salt");
+      // 2 cups flour ~= 2 * 236.588 mL * 0.53 g/mL ~= 251g, well under a 5lb (2268g) bag.
+      const fit = quantityFitScore(
+        { value: 2, unit: "cup", raw_text: "2 cups" },
+        "5 lb",
+        "flour",
+      );
       expect(fit).not.toBeNull();
       expect(fit!.score).toBeGreaterThan(0);
     });
 
     it("still returns null for an unknown ingredient with no density entry", () => {
       const fit = quantityFitScore(
-        { value: 3, unit: "tsp", raw_text: "3 tsp" },
-        "26 oz",
-        "some unlisted spice blend",
+        { value: 2, unit: "cup", raw_text: "2 cups" },
+        "5 lb",
+        "some unlisted bulk ingredient",
       );
       expect(fit).toBeNull();
     });
 
     it("still returns null when no canonicalName is passed at all (back-compat)", () => {
-      const fit = quantityFitScore({ value: 3, unit: "tsp", raw_text: "3 tsp" }, "26 oz");
+      const fit = quantityFitScore({ value: 2, unit: "cup", raw_text: "2 cups" }, "5 lb");
       expect(fit).toBeNull();
     });
 
     it("never bridges count across categories, even with a density available", () => {
-      const fit = quantityFitScore({ value: 2, unit: null, raw_text: "2" }, "26 oz", "salt");
+      const fit = quantityFitScore({ value: 2, unit: null, raw_text: "2" }, "5 lb", "flour");
+      expect(fit).toBeNull();
+    });
+
+    it("returns null for a seasoning name too — density.ts no longer lists them", () => {
+      // rank.ts itself doesn't know about seasonings.ts's classification;
+      // matcher/index.ts is what routes seasonings around quantityFitScore
+      // entirely. This just confirms density.ts has nothing for "salt" now.
+      const fit = quantityFitScore({ value: 3, unit: "tsp", raw_text: "3 tsp" }, "26 oz", "salt");
       expect(fit).toBeNull();
     });
   });

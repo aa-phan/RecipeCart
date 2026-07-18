@@ -223,6 +223,57 @@ describe("matchIngredient", () => {
     expect(result.candidates[0]!.productId).toBe("small");
     expect(result.candidates[0]!.reason).toMatch(/no quantity stated/);
   });
+
+  it("treats a known seasoning as smallest-package-default even with a real stated quantity", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "big",
+          upc: "big",
+          description: "Kroger Iodized Salt (Large)",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 3.29 },
+              size: "48 oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+        product({
+          productId: "small",
+          upc: "small",
+          description: "Kroger Iodized Salt (Small)",
+          items: [
+            {
+              itemId: "2",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 0.99 },
+              size: "26 oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: { value: "salt", evidence: [{ source_type: "caption" }] },
+        raw_text: "3 tsp salt",
+        quantity: { value: 3, unit: "tsp", raw_text: "3 tsp" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+
+    expect(result.requiresApproval).toBe(false);
+    expect(result.candidates[0]!.productId).toBe("small");
+    expect(result.candidates[0]!.reason).toMatch(/seasoning/);
+  });
 });
 
 describe("matchRecipe", () => {

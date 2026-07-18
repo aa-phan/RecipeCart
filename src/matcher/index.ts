@@ -16,6 +16,7 @@ import {
   quantityFitScore,
   textRelevanceScore,
 } from "./rank.js";
+import { isSeasoning } from "./seasonings.js";
 import type { IngredientMatch, ProductCandidate } from "./types.js";
 
 export type { IngredientMatch, ProductCandidate } from "./types.js";
@@ -62,14 +63,20 @@ export async function matchIngredient(
   // rather than skipping the ingredient, and flag it for review below.
   const canonicalName = ingredient.canonical_name_en.value ?? ingredient.raw_text;
   const nameUncertain = ingredient.canonical_name_en.value === null;
-  // No stated amount (vague quantity, e.g. "a pinch", or genuinely never
-  // given) means quantityFitScore never contributes a real signal, so a text
-  // score tie between near-identical branded options isn't an actual
-  // ambiguity to send to human review — it's "there's nothing to decide on."
-  // Spec 3 §2.2 step 3a: default deterministically to the smallest package,
-  // cheapest-price tiebreak, no unit conversion needed since there's no
-  // target quantity to convert toward.
   const hasQuantity = ingredient.quantity.value !== null && ingredient.quantity.value > 0;
+  // Spec 3 §2.2 step 3a: an ingredient defaults to smallest-package-first
+  // (skip quantity-fit scoring and the ambiguity-margin check entirely,
+  // cheapest price as the tiebreak) when EITHER there's no stated amount to
+  // score (vague quantity, e.g. "a pinch", or genuinely never given — no
+  // signal to work with) OR it's a known small-quantity seasoning
+  // (seasonings.ts) — a stated "3 tsp of salt" is real, but no reasonable
+  // recipe amount of salt ever changes which shaker to buy, so scoring it
+  // against package size is a distinction without a purchasing difference.
+  // Quantity-fit scoring (with cross-category density conversion,
+  // density.ts) is reserved for "core" bulk ingredients — meats, produce,
+  // flour, sugar, oil, dairy — where portion size is a real decision (2 lb
+  // of chicken vs 5 lb).
+  const useSmallestPackageDefault = !hasQuantity || isSeasoning(canonicalName);
 
   if (!canonicalName || canonicalName.trim().length === 0) {
     return {
@@ -92,7 +99,9 @@ export async function matchIngredient(
       for (const item of product.items) {
         if (item.inventory?.stockLevel === "TEMPORARILY_OUT_OF_STOCK") continue;
 
-        const qFit = quantityFitScore(ingredient.quantity, item.size, canonicalName);
+        const qFit = useSmallestPackageDefault
+          ? null
+          : quantityFitScore(ingredient.quantity, item.size, canonicalName);
         const price = item.price?.regular ?? null;
         const unitPrice = price != null ? computeUnitPrice(price, item.size) : undefined;
         const rankScore = textScore * 10 + (qFit ? qFit.score * 3 : 0);
@@ -126,7 +135,7 @@ export async function matchIngredient(
     };
   }
 
-  candidates.sort(hasQuantity ? compareCandidates : compareBySmallestPackage);
+  candidates.sort(useSmallestPackageDefault ? compareBySmallestPackage : compareCandidates);
   candidates = candidates.slice(0, MAX_CANDIDATES);
 
   let requiresApproval = false;
@@ -135,10 +144,12 @@ export async function matchIngredient(
   if (candidates.length === 0) {
     requiresApproval = true;
     approvalReason = "no in-stock candidates found a relevant text match for this ingredient";
-  } else if (!hasQuantity) {
+  } else if (useSmallestPackageDefault) {
     // Deterministic by construction (smallest package, cheapest tiebreak) —
     // never flagged as ambiguous just because there was nothing to score.
-    candidates[0]!.reason = "no quantity stated — smallest package selected";
+    candidates[0]!.reason = hasQuantity
+      ? "small seasoning amount — smallest package selected regardless of stated quantity"
+      : "no quantity stated — smallest package selected";
   } else if (candidates.length >= 2) {
     const [top, second] = candidates;
     if (top!.rankScore - second!.rankScore < AMBIGUITY_MARGIN) {

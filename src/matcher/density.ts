@@ -1,38 +1,28 @@
 // Ingredient density table (Spec 3 §2.2 step 4: "standard densities like flour
 // ≈120g/cup") — bridges quantityFitScore across the volume/weight category
-// split for a small, explicit list of common pantry/spice ingredients.
-// Recipes state spices/liquids by volume (tsp, cup) but Kroger sells them by
-// weight (oz) far more often than not; without a per-ingredient density,
-// those two units are genuinely not interconvertible (a teaspoon of salt and
-// a teaspoon of flour don't weigh the same), so a generic factor would be a
-// fabricated number. Deliberately conservative: unknown ingredients get NO
-// conversion (quantityFitScore falls back to null, same as before) rather
-// than a guessed density — same no-fabrication principle as the rest of the
-// matching/extraction pipeline.
+// split, but ONLY for "core" bulk ingredients (flour, sugar, oil, dairy,
+// etc.) where the stated recipe amount is a real purchasing decision (2 cups
+// of flour vs 1 tbsp genuinely changes which bag size to buy). Small-amount
+// seasonings/spices (salt, garlic powder, paprika, ...) are deliberately NOT
+// here — see seasonings.ts: for those, no reasonable recipe quantity ever
+// changes which package to buy, so they skip quantity-fit scoring entirely
+// rather than needing a density conversion at all.
+//
+// Without a per-ingredient density, volume and weight units are genuinely
+// not interconvertible (a cup of flour and a cup of honey don't weigh the
+// same), so a generic factor would be a fabricated number. Deliberately
+// conservative: unknown ingredients get NO conversion (quantityFitScore
+// falls back to null, same as before) rather than a guessed density — same
+// no-fabrication principle as the rest of the matching/extraction pipeline.
 //
 // Values are standard culinary approximations (g/mL), not measured — good
 // enough for "does this package roughly cover the recipe's amount," not a
 // nutrition-label-grade claim.
 const DENSITY_G_PER_ML: Record<string, number> = {
-  salt: 1.2,
-  "kosher salt": 1.2,
-  "table salt": 1.2,
   sugar: 0.85,
   "brown sugar": 0.93,
   flour: 0.53,
   "all-purpose flour": 0.53,
-  "garlic powder": 0.45,
-  "onion powder": 0.45,
-  paprika: 0.45,
-  "ground paprika": 0.45,
-  "chili flakes": 0.4,
-  "chilli flakes": 0.4,
-  "red pepper flakes": 0.4,
-  "italian herbs seasoning": 0.35,
-  "italian seasoning": 0.35,
-  "black pepper": 0.5,
-  cinnamon: 0.56,
-  cumin: 0.48,
   oil: 0.92,
   "olive oil": 0.92,
   "vegetable oil": 0.92,
@@ -42,12 +32,12 @@ const DENSITY_G_PER_ML: Record<string, number> = {
   milk: 1.03,
 };
 
-/** Looks up a known culinary density (g/mL) for an ingredient by canonical
- * name — exact match first, then a whole-word/phrase match (so "fresh garlic
- * powder" still resolves via "garlic powder", but "boiled potatoes" does NOT
- * false-positive-match "oil"). Returns null for anything not on the explicit
- * list; callers must treat that as "can't convert," never fall back to a
- * guess. */
+/** Looks up a known culinary density (g/mL) for a core/bulk ingredient by
+ * canonical name — exact match first, then a whole-word/phrase match (so
+ * "fresh olive oil" still resolves via "olive oil", but "boiled potatoes"
+ * does NOT false-positive-match "oil"). Returns null for anything not on the
+ * explicit list (including all seasonings — see seasonings.ts); callers
+ * must treat that as "can't convert," never fall back to a guess. */
 export function densityForIngredient(canonicalName: string): number | null {
   const key = canonicalName.trim().toLowerCase();
   if (key in DENSITY_G_PER_ML) return DENSITY_G_PER_ML[key]!;
