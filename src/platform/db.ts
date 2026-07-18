@@ -50,7 +50,7 @@ function migrate(database: DatabaseSync): void {
 
     CREATE TABLE IF NOT EXISTS product_matches (
       id TEXT PRIMARY KEY,
-      ingredient_id TEXT NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
+      ingredient_id TEXT NOT NULL UNIQUE REFERENCES ingredients(id) ON DELETE CASCADE,
       candidates_json TEXT NOT NULL DEFAULT '[]', -- ranked Kroger Products API candidates
       selected_product_id TEXT,
       requires_approval INTEGER NOT NULL DEFAULT 0,
@@ -71,7 +71,6 @@ function migrate(database: DatabaseSync): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_ingredients_recipe_id ON ingredients(recipe_id);
-    CREATE INDEX IF NOT EXISTS idx_product_matches_ingredient_id ON product_matches(ingredient_id);
     CREATE INDEX IF NOT EXISTS idx_cart_runs_recipe_id ON cart_runs(recipe_id);
   `);
 }
