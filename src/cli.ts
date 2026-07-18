@@ -211,7 +211,13 @@ function ingredientsTableRows(recipeId: string, recipe: Recipe) {
 
 program
   .argument("[tiktok-url]", "a TikTok recipe URL to extract and match")
-  .action(async (tiktokUrl?: string) => {
+  .option(
+    "--mock",
+    "skip the real Claude call (mock_reconcile.ts heuristic instead) — for local dev/testing " +
+      "the rest of the pipeline (real download, real local OCR/ASR, real Kroger calls) at zero " +
+      "API cost. Recipe title is prefixed [MOCK] so mock runs are never mistaken for real ones.",
+  )
+  .action(async (tiktokUrl: string | undefined, cmdOptions: { mock?: boolean }) => {
     if (!tiktokUrl) {
       program.help();
       return;
@@ -224,10 +230,16 @@ program
       return;
     }
 
+    if (cmdOptions.mock) {
+      console.log("--mock: skipping the real Claude call, using the local heuristic instead.\n");
+    }
+
     try {
       const jobId = crypto.randomUUID();
-      logger.info("extraction: starting", { tiktokUrl, jobId });
-      const { recipe, recipeId } = await extract(tiktokUrl, jobId);
+      logger.info("extraction: starting", { tiktokUrl, jobId, mock: cmdOptions.mock ?? false });
+      const { recipe, recipeId } = await extract(tiktokUrl, jobId, {
+        mockReconcile: cmdOptions.mock,
+      });
 
       if (recipe.result_type === "not_a_recipe") {
         console.log(`Not a recipe: ${recipe.not_a_recipe_reason ?? "no reason given"}`);

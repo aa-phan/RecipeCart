@@ -22,6 +22,7 @@ import { ocrFrames } from "./ocr.js";
 import { transcribeAudio } from "./asr.js";
 import { selectEscalationFrames } from "./escalate_select.js";
 import { reconcile } from "./reconcile.js";
+import { mockReconcile } from "./mock_reconcile.js";
 import { postprocess } from "./postprocess.js";
 import type { JobContext } from "./types.js";
 
@@ -35,10 +36,18 @@ function isImageFile(p: string): boolean {
 /** Returns the extracted Recipe along with the id its `recipes` row was
  * persisted under — reuses the caller-supplied `jobId` as that id, so the
  * caller (matcher/cart-runner integration) never has to guess or re-derive
- * it. */
+ * it.
+ *
+ * `mockReconcile: true` skips the real Claude call entirely, using a dumb
+ * heuristic instead (mock_reconcile.ts) — for local dev/testing the rest of
+ * the pipeline (real download, real local OCR/ASR, real Kroger calls) at
+ * zero API cost. Explicit opt-in only; never silently substituted, so a
+ * misconfigured "real" run fails loudly (missing ANTHROPIC_API_KEY) rather
+ * than quietly producing mock data. */
 export async function extract(
   url: string,
   jobId: string,
+  options: { mockReconcile?: boolean } = {},
 ): Promise<{ recipe: Recipe; recipeId: string }> {
   const jobDir = tempDirFor(jobId);
   const ctx: JobContext = { jobId, jobDir, sourceUrl: url };
@@ -88,15 +97,19 @@ export async function extract(
       asrSegmentCount: asrSegments.length,
       ocrBlockCount: ocrBlocks.length,
       escalationFrameCount: escalationFramePaths.length,
+      mockReconcile: options.mockReconcile ?? false,
     });
 
-    const reconciled = await reconcile({
+    const reconcileInput = {
       sourceUrl: url,
       caption,
       asrSegments,
       ocrBlocks,
       escalationFramePaths,
-    });
+    };
+    const reconciled = options.mockReconcile
+      ? mockReconcile(reconcileInput)
+      : await reconcile(reconcileInput);
 
     const recipe = postprocess(reconciled);
 
