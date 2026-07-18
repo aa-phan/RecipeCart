@@ -101,28 +101,47 @@ Unchanged from the original design — this logic was always retailer-agnostic:
    code only checked `stockLevel` and added it. Requiring a live fulfillment method
    fixes that class outright. (Kroger's Products API availability signalling is
    imperfect; this is the strongest orderability signal it exposes, not a guarantee.)
-2a. **One-step broadened fallback search**, only when a core (non-seasoning, quantified)
-   ingredient's specific-name search found no in-stock covering package: drop the last
-   word of the canonical name (e.g. "garlic & herb cream cheese" → "garlic & herb
-   cream") and search again, merging any new results in. Live-verified case: Kroger
-   sells a same-flavor product under a different category name (a "gourmet cheese"/
-   "spreadable cheese" rather than literally "cream cheese") that the exact-name query
-   never surfaces at all. **Requires the dropped word to still appear in the
-   candidate's description** (e.g. "cheese" must appear somewhere) before it's
-   considered — found live that omitting this let a completely wrong product
-   ("Soules Kitchen Creamy Garlic & Herb CHICKEN") score identically to the real
-   cheese alternatives, since "cream" fuzzy-matches "creamy" regardless of whether
-   it's describing a cheese or a meat dish; requiring "cheese" specifically threw out
-   the chicken while keeping the real matches. **Any candidate found only via this
-   broadened search is always `requires_approval`, even if it would otherwise
-   deterministically win the covers-first ranking (§2.2 step 3)** — it wasn't found
-   under the ingredient's own name, so per this spec's existing materiality rule
-   ("different ingredient as stand-in = material... when in doubt → material"), a
-   human should confirm it's an acceptable substitute before it's ever added to a
-   real cart. This is a local, deterministic safety net, not the actual
-   Claude-delegated materiality judgment `[P2]` already scopes — it only ever makes a
-   previously-invisible option visible and flagged, never makes the accept/reject
-   call on its own.
+2a. **Two-direction broadened fallback search**, tried in order, stopping at the first
+   that returns anything, when EITHER (a) the specific-name search returned zero
+   results outright — any ingredient category, not just core/quantified ones — or
+   (b) a core (non-seasoning, quantified) ingredient's search found candidates but
+   none covers the needed quantity:
+   - **Trailing-word drop** (tried first): drop the last word of the canonical name
+     (e.g. "garlic & herb cream cheese" → "garlic & herb cream"). Live-verified case:
+     Kroger sells a same-flavor product under a different category name (a "gourmet
+     cheese"/"spreadable cheese" rather than literally "cream cheese") that the
+     exact-name query never surfaces. **Requires the dropped word to still appear in
+     the candidate's description** (e.g. "cheese" must appear somewhere) — found live
+     that omitting this let a completely wrong product ("Soules Kitchen Creamy Garlic
+     & Herb CHICKEN") score identically to the real cheese alternatives, since
+     "cream" fuzzy-matches "creamy" regardless of cheese vs. meat; requiring "cheese"
+     specifically throws out the chicken while keeping the real matches.
+   - **Leading-word drop** (tried second, only if the first found nothing): drop the
+     *first* word instead (e.g. "Light Garlic & Herb Cream Cheese" → "Garlic & Herb
+     Cream Cheese"). Live-verified case, found via a real cart-add: Kroger's search
+     returned **zero results** for "Light Garlic & Herb Cream Cheese" verbatim from a
+     real caption — and trailing-drop alone ALSO returned zero ("Cheese" wasn't the
+     problem word; "Light" was). Dropping the leading word found real candidates.
+     **Does NOT require the dropped word back** — unlike trailing-drop, the point of
+     dropping a leading descriptive modifier ("Light"/"Fresh"/"Organic") is finding
+     the product *without* that modifier, so requiring it back would defeat the
+     broadening entirely; ordinary text-relevance scoring against the full original
+     name is the safety net here instead. Deliberately stops at one word per
+     direction — dropping to just the middle flavor words (e.g. "garlic herb")
+     returned pasta sauce, seasoning shakers, and pork chops at the exact same
+     text-relevance score as real matches, with no reliable way to tell them apart
+     locally.
+
+   **Any candidate found only via either broadened-search direction is always
+   `requires_approval`, even if it would otherwise deterministically win its ranking
+   (§2.2 step 3, or the smallest-package default for seasonings/no-quantity
+   ingredients)** — it wasn't found under the ingredient's own name, so per this
+   spec's existing materiality rule ("different ingredient as stand-in = material...
+   when in doubt → material"), a human should confirm it's an acceptable substitute
+   before it's ever added to a real cart. This is a local, deterministic safety net,
+   not the actual Claude-delegated materiality judgment `[P2]` already scopes — it
+   only ever makes a previously-invisible option visible and flagged, never makes the
+   accept/reject call on its own.
 3. Rank: text/semantic relevance gate → product-form fit (shredded vs block;
    Claude-delegated when text is inconclusive) → quantity-to-package fit (closest-over
    preferred; large mismatch flagged, not excluded if it's the only option) → user

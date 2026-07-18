@@ -157,43 +157,62 @@ interface ScoredCandidate {
 
 interface BroadenedSearch {
   term: string;
-  // The word dropped to build `term` — e.g. "cheese" for "garlic & herb
-  // cream cheese" -> "garlic & herb cream". Kept separately so callers can
-  // still REQUIRE it in a candidate's description (see
-  // searchAndBuildCandidates's `requiredWord`): broadening the QUERY sent to
-  // Kroger is safe (it only widens what comes back), but without this
-  // requirement, a partial-token-overlap candidate that's missing the one
-  // word that actually identifies the product type can score just as well
-  // as a real match. Confirmed live: dropping "cheese" from "garlic & herb
-  // cream cheese" to search "garlic & herb cream" surfaced both a genuine
-  // alternative (a garlic & herb spreadable cheese under a different brand)
-  // AND "Soules Kitchen Creamy Garlic & Herb CHICKEN" at an IDENTICAL local
-  // relevance score (3 of 4 tokens matched either way — "cream" fuzzy-
-  // matches "creamy" regardless of whether it's describing a cheese or a
-  // meat dish). Requiring "cheese" specifically in the description throws
-  // out the chicken while keeping the real cheese alternatives.
-  droppedWord: string;
+  // The word dropped to build `term`, when it should be REQUIRED back in a
+  // candidate's description (see searchAndBuildCandidates's `requiredWord`)
+  // — null when it should NOT be required. These mean different things
+  // depending on which word was dropped:
+  //   - Dropping the TRAILING word is usually dropping the category noun
+  //     ("cheese" in "garlic & herb cream cheese") — broadening the QUERY is
+  //     safe, but without requiring that word back, a same-token-overlap
+  //     candidate from a completely different category can score just as
+  //     well. Confirmed live: dropping "cheese" to search "garlic & herb
+  //     cream" surfaced both a genuine alternative AND "Soules Kitchen
+  //     Creamy Garlic & Herb CHICKEN" at an identical relevance score
+  //     ("cream" fuzzy-matches "creamy" regardless of cheese vs. meat).
+  //     Requiring "cheese" back throws out the chicken, keeps the cheese.
+  //   - Dropping the LEADING word is usually dropping a descriptive
+  //     modifier ("Light" in "Light Garlic & Herb Cream Cheese") — the
+  //     whole point is finding the product WITHOUT that modifier, so
+  //     requiring it back would defeat the broadening entirely. Confirmed
+  //     live: Kroger's search returned 0 results for "Light Garlic & Herb
+  //     Cream Cheese" verbatim; dropping "Cheese" (trailing) ALSO returned
+  //     0 — "Light" was the actual problem word, not "Cheese". Dropping
+  //     "Light" (leading) found the real candidates. No requiredWord here;
+  //     ordinary text-relevance scoring against the full original name is
+  //     the safety net instead, plus `fromBroadenedSearch` still forces
+  //     approval regardless of which strategy found the pick.
+  droppedWord: string | null;
 }
 
-/** Drops the last whitespace-separated word of a multi-word ingredient name
- * to build a broader fallback search term (Spec 3 §2.2 step 2) — e.g.
- * "garlic & herb cream cheese" -> "garlic & herb cream". Live-tested: this
- * one-step broadening reliably surfaces genuine near-alternatives Kroger's
- * own search missed on the exact name (a "cream cheese" flavor also sold as
- * a "spreadable cheese"/"gourmet cheese") without pulling in the noise a
- * more aggressive broadening does — dropping to just the flavor words alone
- * (e.g. "garlic herb") returned pasta sauce, seasoning shakers, and pork
- * chops at the exact same text-relevance score as the real matches, with no
- * reliable way to tell them apart locally. Returns null for a single-word
- * name (nothing left to drop) or when the search term didn't actually
- * change (nothing usefully broadened).
+/** Builds up to two broader fallback search terms (Spec 3 §2.2 step 2) by
+ * dropping one whitespace-separated word — trailing, then leading — e.g.
+ * "garlic & herb cream cheese" -> "garlic & herb cream" (trailing) and
+ * "Light Garlic & Herb Cream Cheese" -> "Garlic & Herb Cream Cheese"
+ * (leading). Tried in this order by the caller, stopping at the first
+ * strategy that returns any candidates. Live-tested: a single direction
+ * isn't enough — the "problem word" that makes Kroger's own search return
+ * nothing can be at either end of the name, and trying only the trailing
+ * drop silently failed on a real recipe where the leading word ("Light")
+ * was the actual issue. Deliberately stops at one word dropped per
+ * direction — dropping to just the middle flavor words (e.g. "garlic herb")
+ * returned pasta sauce, seasoning shakers, and pork chops at the exact same
+ * text-relevance score as real matches, with no reliable way to tell them
+ * apart locally. Returns [] for a single-word name (nothing left to drop).
  */
-function broadenedSearchTerm(canonicalName: string): BroadenedSearch | null {
+function broadenedSearchTerms(canonicalName: string): BroadenedSearch[] {
   const words = canonicalName.trim().split(/\s+/);
-  if (words.length < 2) return null;
-  const term = words.slice(0, -1).join(" ").trim();
-  if (term.length === 0) return null;
-  return { term, droppedWord: words[words.length - 1]!.toLowerCase() };
+  if (words.length < 2) return [];
+
+  const strategies: BroadenedSearch[] = [];
+  const dropLast = words.slice(0, -1).join(" ").trim();
+  if (dropLast.length > 0) {
+    strategies.push({ term: dropLast, droppedWord: words[words.length - 1]!.toLowerCase() });
+  }
+  const dropFirst = words.slice(1).join(" ").trim();
+  if (dropFirst.length > 0 && dropFirst !== dropLast) {
+    strategies.push({ term: dropFirst, droppedWord: null });
+  }
+  return strategies;
 }
 
 /** Searches Kroger and builds scored candidates for one query term. Always
@@ -390,15 +409,27 @@ export async function matchIngredient(
       false,
     );
 
-    // Only reach for a broadened search when it's actually load-bearing: a
-    // core (non-seasoning) ingredient with a real quantity, where nothing
-    // in the specific-name results covers the need. Cheap to check before
-    // spending a second Kroger call.
+    // Reach for a broadened search when it's actually load-bearing:
+    //   - the specific-name search returned NOTHING at all — found live:
+    //     Kroger's own search API returned zero results for "Light Garlic &
+    //     Herb Cream Cheese" (verbatim from a real caption), while dropping
+    //     just "Light" returned real candidates for the same underlying
+    //     product. This can hit any ingredient category, seasonings and
+    //     no-quantity ones included — an empty result set is a query
+    //     problem, not a coverage or ambiguity problem, so it isn't gated
+    //     behind `!useSmallestPackageDefault` the way the case below is.
+    //   - OR (core, non-seasoning ingredients only) candidates came back but
+    //     none of them cover the needed quantity.
+    // Cheap to check before spending a second Kroger call.
+    const foundNothing = scored.length === 0;
     const coveredAlready = scored.some((s) => s.qFit?.covers);
-    if (!useSmallestPackageDefault && scored.some((s) => s.qFit !== null) && !coveredAlready) {
-      const broadened = broadenedSearchTerm(canonicalName);
-      if (broadened) {
-        broadenedTermUsed = broadened.term;
+    const coreUncovered =
+      !useSmallestPackageDefault && scored.some((s) => s.qFit !== null) && !coveredAlready;
+    if (foundNothing || coreUncovered) {
+      // Try trailing-drop first, then leading-drop, stopping at the first
+      // strategy that actually returns something — no need to spend a third
+      // Kroger call once one has already found candidates.
+      for (const broadened of broadenedSearchTerms(canonicalName)) {
         const extra = await searchAndBuildCandidates(
           broadened.term,
           canonicalName,
@@ -407,8 +438,11 @@ export async function matchIngredient(
           locationId,
           appToken,
           true,
-          broadened.droppedWord,
+          broadened.droppedWord ?? undefined,
         );
+        if (extra.length === 0) continue;
+
+        broadenedTermUsed = broadened.term;
         const seenIds = new Set(scored.map((s) => s.candidate.productId));
         for (const e of extra) {
           if (!seenIds.has(e.candidate.productId)) {
@@ -416,6 +450,7 @@ export async function matchIngredient(
             seenIds.add(e.candidate.productId);
           }
         }
+        break;
       }
     }
   } catch (err) {
@@ -461,9 +496,19 @@ export async function matchIngredient(
   } else if (useSmallestPackageDefault) {
     // Deterministic by construction (best name match, cheapest tiebreak) —
     // never flagged as ambiguous just because there was nothing to score.
-    candidates[0]!.reason = hasQuantity
-      ? "small seasoning amount — cheapest well-matched product selected regardless of stated quantity"
-      : "no quantity stated — cheapest well-matched product selected";
+    // EXCEPT when the top pick only turned up via the broadened search
+    // (see the materiality note on ScoredCandidate.fromBroadenedSearch
+    // above) — same rule as the core-ingredient path below, applied here
+    // too now that broadening can fire for seasonings/no-quantity
+    // ingredients on a zero-result primary search.
+    if (scored[0]!.fromBroadenedSearch) {
+      requiresApproval = true;
+      approvalReason = `found via a broadened search ("${broadenedTermUsed}") rather than "${canonicalName}" directly — confirm "${candidates[0]!.name}" is an acceptable substitute before approving`;
+    } else {
+      candidates[0]!.reason = hasQuantity
+        ? "small seasoning amount — cheapest well-matched product selected regardless of stated quantity"
+        : "no quantity stated — cheapest well-matched product selected";
+    }
   } else if (useQuantityCoverage) {
     // "Convert to the package's unit, then pick the smallest size (or
     // smallest number of packages) that fully covers the needed quantity"

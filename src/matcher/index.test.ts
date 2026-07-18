@@ -423,6 +423,114 @@ describe("matchIngredient", () => {
     expect(result.requiresApproval).toBe(false);
   });
 
+  it("broadens the search when the specific-name search returns zero results outright (core ingredient)", async () => {
+    // Real case: Kroger's own search API returned 0 results for "Light
+    // Garlic & Herb Cream Cheese" (verbatim from a caption) — dropping just
+    // "Light" found real candidates for the same underlying product. This
+    // is a completely empty primary result set, not "found some candidates
+    // but none cover the need" — a distinct trigger from the multi-buy test
+    // above.
+    (searchProducts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        data: [],
+        meta: { pagination: { start: 0, limit: 10, total: 0 } },
+      } satisfies KrogerProductSearchResponse)
+      .mockResolvedValueOnce({
+        data: [
+          product({
+            productId: "found-via-broadening",
+            upc: "found-via-broadening",
+            description: "Philadelphia Garlic & Herb Cream Cheese",
+            items: [
+              {
+                itemId: "1",
+                fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+                price: { regular: 4.39 },
+                size: "16 oz",
+                soldBy: "UNIT",
+              },
+            ],
+          }),
+        ],
+        meta: { pagination: { start: 0, limit: 10, total: 1 } },
+      } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: {
+          value: "Light Garlic & Herb Cream Cheese",
+          evidence: [{ source_type: "caption" }],
+        },
+        raw_text: "250g Light Garlic & Herb Cream Cheese",
+        quantity: { value: 250, unit: "g", raw_text: "250g" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+
+    expect(searchProducts).toHaveBeenCalledTimes(2);
+    expect(searchProducts).toHaveBeenNthCalledWith(
+      2,
+      "Light Garlic & Herb Cream Cheese".split(" ").slice(0, -1).join(" "),
+      "01100002",
+      "tok",
+      50,
+    );
+    expect(result.candidates[0]!.productId).toBe("found-via-broadening");
+    expect(result.requiresApproval).toBe(true);
+    expect(result.approvalReason).toMatch(/found via a broadened search/);
+  });
+
+  it("broadens the search when a seasoning's specific-name search returns zero results, still flagging materiality", async () => {
+    // Same zero-result trigger, but for a seasoning (useSmallestPackageDefault
+    // path) — confirms that branch also checks fromBroadenedSearch rather
+    // than always auto-resolving once broadening is extended to fire there.
+    (searchProducts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        data: [],
+        meta: { pagination: { start: 0, limit: 10, total: 0 } },
+      } satisfies KrogerProductSearchResponse)
+      .mockResolvedValueOnce({
+        data: [
+          product({
+            productId: "seasoning-via-broadening",
+            upc: "seasoning-via-broadening",
+            description: "Kroger Smoked Paprika",
+            items: [
+              {
+                itemId: "1",
+                fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+                price: { regular: 2.99 },
+                size: "2 oz",
+                soldBy: "UNIT",
+              },
+            ],
+          }),
+        ],
+        meta: { pagination: { start: 0, limit: 10, total: 1 } },
+      } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: {
+          value: "Fancy Smoked Paprika",
+          evidence: [{ source_type: "caption" }],
+        },
+        raw_text: "1 tsp Fancy Smoked Paprika",
+        quantity: { value: 1, unit: "tsp", raw_text: "1 tsp" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+
+    expect(searchProducts).toHaveBeenCalledTimes(2);
+    expect(result.candidates[0]!.productId).toBe("seasoning-via-broadening");
+    expect(result.requiresApproval).toBe(true);
+    expect(result.approvalReason).toMatch(/found via a broadened search/);
+  });
+
   it("falls back to the text-score + margin check when quantity is stated but unparseable", async () => {
     // "2 knobs" of butter — a real quantity value, but "knob" isn't a
     // recognized unit, so quantityFitScore can never produce a fit for any
