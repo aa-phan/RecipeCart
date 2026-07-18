@@ -18,14 +18,11 @@ export const config = {
   secrets: {
     // Read lazily (via getters) so importing config doesn't throw before
     // .env is needed — e.g. `recipecart --help` shouldn't require keys.
+    // Claude (Anthropic) is the ONLY cloud AI dependency by design — OCR
+    // (tesseract.js) and ASR (local Whisper via @huggingface/transformers)
+    // both run on-device, so there's no OpenAI/Google Vision key here.
     get anthropicApiKey() {
       return requireEnv("ANTHROPIC_API_KEY");
-    },
-    get openaiApiKey() {
-      return requireEnv("OPENAI_API_KEY");
-    },
-    get googleApplicationCredentials() {
-      return requireEnv("GOOGLE_APPLICATION_CREDENTIALS");
     },
     get krogerClientId() {
       return requireEnv("KROGER_CLIENT_ID");
@@ -62,6 +59,13 @@ export const config = {
     },
     claudeModel: "claude-sonnet-5",
     claudeMaxTokens: 4000,
+    // Local Whisper model (Hugging Face Hub id, downloaded once on first use
+    // and cached). Deliberately multilingual (not a "*.en" variant) — Spec 2
+    // requires ASR/OCR auto-detection with no English special-casing.
+    // "base" balances download size (~145MB) against quality/speed for local
+    // dev; swap to a bigger variant here (no code change) if quality proves
+    // insufficient once real data exists.
+    whisperModel: "Xenova/whisper-base",
     schemaVersion: "2026-07-schema-v1",
     downloadStartTimeoutMs: 45_000,
     downloadTotalTimeoutMs: 180_000,

@@ -20,11 +20,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
-    "@google-cloud/vision": "^5.3.7",
+    "@huggingface/transformers": "^4.2.0",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
-    "openai": "^4.104.0",
+    "tesseract.js": "^7.0.0",
     "zod": "^3.23.8"
+  },
+  "overrides": {
+    "adm-zip": "^0.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.12.0",

@@ -89,8 +89,13 @@ and a Kroger customer account for the target store.
 
 ```bash
 npm install
-cp .env.example .env   # fill in ANTHROPIC_API_KEY, OCR/ASR keys, KROGER_CLIENT_ID/SECRET, KROGER_TOKEN_KEY
+cp .env.example .env   # fill in ANTHROPIC_API_KEY, KROGER_CLIENT_ID/SECRET, KROGER_TOKEN_KEY
 ```
+
+Claude (Anthropic) is the only cloud AI dependency by design — OCR
+(`tesseract.js`) and ASR (local Whisper via `@huggingface/transformers`) both
+run entirely on-device, no OCR/ASR vendor key needed. The Whisper model
+downloads once (from Hugging Face Hub) on first use and is cached locally.
 
 Run the CLI directly with `tsx`, or build first:
 
