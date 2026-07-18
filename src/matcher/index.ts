@@ -28,8 +28,16 @@ export type { IngredientMatch, ProductCandidate } from "./types.js";
 const AMBIGUITY_MARGIN = 1.5;
 // Max candidates surfaced per ingredient (display + storage cleanliness).
 const MAX_CANDIDATES = 5;
-// Kroger search result page size to scan for candidates per ingredient.
-const SEARCH_LIMIT = 10;
+// Kroger search result page size to scan for candidates per ingredient —
+// Kroger's Products API hard-rejects anything above 50 (confirmed live:
+// PRODUCT-2013 "limit must be a number between 1 and 50"), so this is the
+// real ceiling, not an arbitrary choice. A smaller limit (previously 10)
+// silently truncates the response BEFORE ranking ever runs — found via a
+// live query: "chicken breast" against a real store returned covering
+// packages (3 lb, 2.25 lb) only when queried past position 10, so a
+// genuinely-available covering package was invisible to the matcher and
+// got wrongly flagged requires_approval as "no package covers the need."
+const SEARCH_LIMIT = 50;
 
 function compareCandidates(a: ProductCandidate, b: ProductCandidate): number {
   const diff = b.rankScore - a.rankScore;

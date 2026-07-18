@@ -142,7 +142,7 @@ describe("matchIngredient", () => {
     );
     expect(result.canonicalName).toBe("some heavy cream");
     expect(result.requiresApproval).toBe(true);
-    expect(searchProducts).toHaveBeenCalledWith("some heavy cream", "01100002", "tok", 10);
+    expect(searchProducts).toHaveBeenCalledWith("some heavy cream", "01100002", "tok", 50);
   });
 
   it("requires approval when no candidates are found", async () => {

@@ -83,8 +83,20 @@ Unchanged from the original design — this logic was always retailer-agnostic:
 
 1. Normalize canonical name + units (closed set: g/kg/oz/lb, ml/l/tsp/tbsp/cup/fl oz,
    count).
-2. `search_products()` against the active `locationId`; **exclude** out-of-stock
-   outright (Kroger's `stockLevel` field: `HIGH` | `LOW` | `TEMPORARILY_OUT_OF_STOCK`).
+2. `search_products()` against the active `locationId`, requesting Kroger's actual
+   max page size (`filter.limit=50` — confirmed live: the API hard-rejects anything
+   above 50, `PRODUCT-2013`); **exclude** out-of-stock outright (Kroger's `stockLevel`
+   field: `HIGH` | `LOW` | `TEMPORARILY_OUT_OF_STOCK`). **Found via live testing: a
+   smaller page size (previously 10) silently truncates the response before ranking
+   ever runs** — a real covering package for "chicken breast" (3 lb) only appeared
+   past position 10 in Kroger's own relevance ordering, so the matcher never saw it
+   and wrongly flagged the ingredient `requires_approval` as "no package covers the
+   need," when a covering package was genuinely in stock. Not every `requires_approval`
+   case is this — some are real: e.g. "garlic & herb cream cheese" at 250g needed had
+   no in-stock single package ≥8oz across every reasonable query phrasing tried live,
+   at any store search-term variant — Kroger genuinely doesn't carry a large-enough
+   package of that specific product at this store, which is correctly a case for human
+   judgment (buy 2, or substitute), not a search-semantics bug.
 3. Rank: text/semantic relevance gate → product-form fit (shredded vs block;
    Claude-delegated when text is inconclusive) → quantity-to-package fit (closest-over
    preferred; large mismatch flagged, not excluded if it's the only option) → user
