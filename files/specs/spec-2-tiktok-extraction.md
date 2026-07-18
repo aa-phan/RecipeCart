@@ -124,6 +124,39 @@ vision-capable model, and/or on GPU-backed hosting, and/or restricted only to th
 `caption_sufficient` path where it performed best — not a dead end, and not something
 to re-litigate from scratch next time; start from this writeup and the spike script.
 
+### 2.5b Escalation-frame path: correct usage boundary (finding, 2026-07-18)
+
+**The vision-escalation path (§2.4/§2.5, `caption_sufficient: false`) is for reading
+on-screen TEXT/graphics — a printed ingredient list, quantity call-outs, a recipe
+card, or a photo-mode slideshow where the recipe is written out across slides. It is
+NOT a general "watch the video and guess what food is being prepared" input.**
+
+Found via an agent-simulated end-to-end smoke test (real download/OCR/ASR, a
+subagent standing in for the Claude API call against real evidence — see session
+notes) on `@shreddedandfed`'s beef bulgogi video: the only text ever legible on
+screen or in the caption was "beef bulgogi" itself. Everything else the model
+produced — `green onion (scallion)`, `bulgogi sauce`, and every prep/freeze step —
+came from the model visually recognizing objects and actions in the 8 escalation
+frame images (raw meat and scallions in a bowl, sauce being poured, bags being
+sealed), not from any legible text. Nothing was fabricated (the frames really do
+show those things), but it was tagged `source_type: "ocr"` — which the schema and
+the rest of this doc define as on-screen *text* evidence — when it was actually
+general visual inference the schema's evidence taxonomy has no category for.
+
+**This is now a hard rule in the reconcile system prompt** (`reconcile.ts` rule 6):
+frame images may only support a field when the frame also contains legible text
+naming that value; visually recognizing food by appearance alone is explicitly
+disallowed and must fall back to `null` + `null_reason` instead. Practical effect:
+a video like the beef-bulgogi one above — plenty of visual cooking footage, almost
+no on-screen text — should mostly yield `null_reason`s past the title, not a guessed
+ingredient list. The vision-escalation path is only expected to produce a rich,
+evidenced result on the two cases it was actually designed for: (a) videos with a
+genuinely text-dense on-screen ingredient list/recipe card, or (b) photo-mode
+slideshow posts where the recipe is printed across multiple slides. A video that
+triggers escalation but turns out to have sparse on-screen text is a legitimate
+`ocr_low_yield` case (§3) that should mostly resolve to nulls, not a signal to fall
+back on visual guessing.
+
 ## 3. Failure Classification `[P2]`
 
 | Class | Retry | Terminal behavior |

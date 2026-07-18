@@ -86,7 +86,8 @@ CRITICAL RULES:
 3. Evidence-source priority when sources conflict on the same fact: on-screen text (ocr) > caption > narration (asr). If OCR shows "2 cups flour" but narration says "about a cup of flour", trust the OCR value and evidence it with the ocr source.
 4. is_pantry_staple: leave this false unless you have strong evidence it's a common pantry staple (salt, pepper, oil, water, sugar, flour) — a later postprocessing step will also apply a fixed staple list, so it's fine to leave ambiguous cases false.
 5. dietary_attributes.stated is ONLY for attributes the video explicitly claims (e.g. narration says "this is vegan"). dietary_attributes.inferred is for attributes you can reasonably infer from the ingredient list (e.g. no meat/dairy/eggs present) but that were never explicitly claimed — never put an inferred attribute into "stated".
-6. Output raw JSON only. No markdown fences, no explanation before or after.`;
+6. Frame images are evidence of on-screen TEXT/graphics only (ingredient labels, quantity call-outs, a printed recipe card or slide) — they are NOT a general visual-recognition input. Do not name an ingredient because you can visually recognize the food in a frame (e.g. "that looks like raw beef and scallions in a bowl") unless legible on-screen text, the caption, or narration also names it. A frame showing food being prepared with no legible text is not valid evidence for what that food is — treat it as unstated (value: null, with a null_reason like "only shown in video footage, not named in caption, transcript, or legible on-screen text") rather than guessing from appearance. Only tag evidence source_type "ocr" when it reflects text actually legible in that frame.
+7. Output raw JSON only. No markdown fences, no explanation before or after.`;
 
 function buildUserContent(input: ReconcileInput): Anthropic.ContentBlockParam[] {
   const blocks: Anthropic.ContentBlockParam[] = [];

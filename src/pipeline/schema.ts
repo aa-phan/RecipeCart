@@ -11,6 +11,10 @@ import { z } from "zod";
 export const SCHEMA_VERSION = "2026-07-schema-v1";
 
 export const EvidenceRefSchema = z.object({
+  // "ocr" means text legible in a frame (tesseract output, or Claude reading
+  // on-screen text/graphics directly from an escalation frame image) — NOT
+  // general visual recognition of food/objects in a frame with no
+  // accompanying text. See spec-2-tiktok-extraction.md §2.5b.
   source_type: z.enum(["asr", "ocr", "caption"]),
   timestamp: z.number().nonnegative().optional(),
   frame_ref: z.string().optional(),
