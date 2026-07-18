@@ -156,7 +156,11 @@ describe("matchIngredient", () => {
     expect(result.requiresApproval).toBe(true);
   });
 
-  it("requires approval when the top two candidates are closely scored", async () => {
+  it("auto-resolves a genuine tie (identical size and price) deterministically rather than requiring approval", async () => {
+    // Both candidates fully cover the 1-cup need at the same size/price —
+    // there's nothing to actually decide between them, so this should
+    // resolve rather than block (same philosophy as the seasoning/
+    // no-quantity default: a real tie means the choice doesn't matter).
     (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: [
         product({ productId: "a", upc: "a", description: "Kroger Heavy Whipping Cream" }),
@@ -166,6 +170,73 @@ describe("matchIngredient", () => {
     } satisfies KrogerProductSearchResponse);
 
     const result = await matchIngredient(ingredient(), "ing-1", "01100002", "tok");
+    expect(result.requiresApproval).toBe(false);
+    expect(result.candidates[0]!.productId).toBe("a");
+  });
+
+  it("requires approval when no available package covers the needed quantity", async () => {
+    // Needs 800g of chicken breast; only undersized packages are available
+    // (a real case from live data) — buying 1 unit would silently
+    // under-shop the recipe, so this must surface for review rather than
+    // silently picking the "closest" undersized option.
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "a",
+          upc: "a",
+          description: "Kroger Chicken Breast",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 5.0 },
+              size: "1 lb",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 1 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: { value: "chicken breast", evidence: [{ source_type: "caption" }] },
+        raw_text: "800g chicken breast",
+        quantity: { value: 800, unit: "g", raw_text: "800g" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+    expect(result.requiresApproval).toBe(true);
+    expect(result.approvalReason).toMatch(/no single available package covers/);
+  });
+
+  it("falls back to the text-score + margin check when quantity is stated but unparseable", async () => {
+    // "2 knobs" of butter — a real quantity value, but "knob" isn't a
+    // recognized unit, so quantityFitScore can never produce a fit for any
+    // candidate here; must fall back to the old margin-based check rather
+    // than silently defaulting to smallest-package (which is reserved for
+    // genuinely no-quantity/seasoning cases).
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({ productId: "a", upc: "a", description: "Kroger Butter" }),
+        product({ productId: "b", upc: "b", description: "Kroger Butter" }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: { value: "butter", evidence: [{ source_type: "caption" }] },
+        raw_text: "2 knobs butter",
+        quantity: { value: 2, unit: "knob", raw_text: "2 knobs" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
     expect(result.requiresApproval).toBe(true);
     expect(result.approvalReason).toMatch(/closely matched/);
   });

@@ -89,6 +89,27 @@ Unchanged from the original design — this logic was always retailer-agnostic:
    Claude-delegated when text is inconclusive) → quantity-to-package fit (closest-over
    preferred; large mismatch flagged, not excluded if it's the only option) → user
    preference boosts/filters `[P3, needs Spec 1 prefs]` → unit price tiebreak.
+   **For "core" ingredients with a usable quantity (not a seasoning, not
+   no-stated-quantity — §2.2 step 3a), this is now a hard, deterministic bucket
+   rule, not a blended score:** convert the needed quantity into the candidate
+   package's unit, bucket candidates into "fully covers the need" vs "undersized"
+   (a covering package ALWAYS outranks an undersized one, regardless of surplus
+   size — `covers` field, `rank.ts`), then within the covering bucket pick the
+   smallest surplus (closest-over), price as the final tiebreak. This replaced a
+   blended `textScore*10 + qFit.score*3` ranking + a fixed `AMBIGUITY_MARGIN`
+   gate, which — even after the density-conversion and seasoning fixes above —
+   still routinely swallowed a real, correctly-computed quantity-fit signal: e.g.
+   two same-size, different-price bottles of olive oil both "covering" the need
+   scored identically on the blended metric and stayed stuck at
+   `requires_approval` even though price alone cleanly picks a winner. The one
+   case that still (correctly) requires approval: **no candidate covers the
+   needed quantity at all** — since the P1 cart runner only ever adds 1 unit per
+   ingredient (§2.2 step 3, unchanged), auto-picking the "closest" undersized
+   package would silently under-shop the recipe, so that's surfaced to a human
+   rather than guessed. Falls back to the old blended-score/margin check only
+   when quantity-fit is un-computable for every candidate (e.g. a stated amount
+   in a genuinely unparseable unit like "2 knobs") — there's nothing to convert
+   toward in that case, so the deterministic rule doesn't apply.
 4. Purchase-quantity math from a deterministic conversion table (volume↔fl oz/ml;
    standard densities like flour ≈120g/cup). Smallest-package-covers rule; surplus is
    normal. **Implemented (`density.ts`) as a small, explicit per-ingredient density

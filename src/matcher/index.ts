@@ -15,6 +15,7 @@ import {
   packageSizeMagnitude,
   quantityFitScore,
   textRelevanceScore,
+  type QuantityFit,
 } from "./rank.js";
 import { isSeasoning } from "./seasonings.js";
 import type { IngredientMatch, ProductCandidate } from "./types.js";
@@ -46,6 +47,40 @@ function compareBySmallestPackage(a: ProductCandidate, b: ProductCandidate): num
   const diff = packageSizeMagnitude(a.size) - packageSizeMagnitude(b.size);
   if (diff !== 0) return diff;
   if (a.price != null && b.price != null) return a.price - b.price;
+  return 0;
+}
+
+interface ScoredCandidate {
+  candidate: ProductCandidate;
+  qFit: QuantityFit | null;
+}
+
+/** Buckets a candidate: fully-covers-the-need (0) always beats an undersized
+ * package (1), which always beats an un-scoreable one (2, unparseable size)
+ * — regardless of score magnitude. See QuantityFit.covers's doc for why this
+ * can't just be "sort by score." */
+function coverageBucket(qFit: QuantityFit | null): 0 | 1 | 2 {
+  if (qFit === null) return 2;
+  return qFit.covers ? 0 : 1;
+}
+
+/** "Convert to the package's unit, then pick the smallest size that fully
+ * covers the needed quantity" (Spec 3 §2.2 step 3): bucket by coverage
+ * first (a covering package always wins over an undersized one, however
+ * small the surplus), then within a bucket prefer the closest fit (smallest
+ * surplus if covering, largest available if undersized — both are
+ * `qFit.score` descending), then cheapest price as the final tiebreak. */
+function compareByQuantityCoverage(a: ScoredCandidate, b: ScoredCandidate): number {
+  const bucketDiff = coverageBucket(a.qFit) - coverageBucket(b.qFit);
+  if (bucketDiff !== 0) return bucketDiff;
+
+  if (a.qFit && b.qFit) {
+    const scoreDiff = b.qFit.score - a.qFit.score;
+    if (Math.abs(scoreDiff) > 0.001) return scoreDiff;
+  }
+  if (a.candidate.price != null && b.candidate.price != null) {
+    return a.candidate.price - b.candidate.price;
+  }
   return 0;
 }
 
@@ -89,7 +124,7 @@ export async function matchIngredient(
     };
   }
 
-  let candidates: ProductCandidate[] = [];
+  let scored: ScoredCandidate[] = [];
   try {
     const response = await searchProducts(canonicalName, locationId, appToken, SEARCH_LIMIT);
     for (const product of response.data) {
@@ -106,16 +141,19 @@ export async function matchIngredient(
         const unitPrice = price != null ? computeUnitPrice(price, item.size) : undefined;
         const rankScore = textScore * 10 + (qFit ? qFit.score * 3 : 0);
 
-        candidates.push({
-          productId: product.productId,
-          upc: product.upc,
-          name: product.description,
-          brand: product.brand,
-          price,
-          size: item.size,
-          unitPrice,
-          rankScore,
-          reason: qFit?.note,
+        scored.push({
+          candidate: {
+            productId: product.productId,
+            upc: product.upc,
+            name: product.description,
+            brand: product.brand,
+            price,
+            size: item.size,
+            unitPrice,
+            rankScore,
+            reason: qFit?.note,
+          },
+          qFit,
         });
       }
     }
@@ -135,8 +173,23 @@ export async function matchIngredient(
     };
   }
 
-  candidates.sort(useSmallestPackageDefault ? compareBySmallestPackage : compareCandidates);
-  candidates = candidates.slice(0, MAX_CANDIDATES);
+  // A "core" ingredient (has a real quantity, not a seasoning) only gets the
+  // deterministic covers-first ranking when at least one candidate actually
+  // produced a usable quantity fit — otherwise there's nothing to convert
+  // toward, and it falls back to the old text-score + ambiguity-margin
+  // check (e.g. a stated quantity in a genuinely unparseable unit).
+  const hasUsableQuantityFit = scored.some((s) => s.qFit !== null);
+  const useQuantityCoverage = !useSmallestPackageDefault && hasUsableQuantityFit;
+
+  if (useSmallestPackageDefault) {
+    scored.sort((a, b) => compareBySmallestPackage(a.candidate, b.candidate));
+  } else if (useQuantityCoverage) {
+    scored.sort(compareByQuantityCoverage);
+  } else {
+    scored.sort((a, b) => compareCandidates(a.candidate, b.candidate));
+  }
+  scored = scored.slice(0, MAX_CANDIDATES);
+  const candidates = scored.map((s) => s.candidate);
 
   let requiresApproval = false;
   let approvalReason: string | undefined;
@@ -150,6 +203,19 @@ export async function matchIngredient(
     candidates[0]!.reason = hasQuantity
       ? "small seasoning amount — smallest package selected regardless of stated quantity"
       : "no quantity stated — smallest package selected";
+  } else if (useQuantityCoverage) {
+    // "Convert to the package's unit, then pick the smallest size that
+    // fully covers the needed quantity" (Spec 3 §2.2 step 3) — deterministic
+    // by construction once a real coverage signal exists, EXCEPT when no
+    // candidate actually covers the need: buying 1 unit of an undersized
+    // package would silently under-shop the recipe (cli.ts's `approve` adds
+    // exactly 1 package per ingredient in P1), so that genuinely needs a
+    // human, not a spurious "scores were close" flag.
+    const top = scored[0]!;
+    if (top.qFit && !top.qFit.covers) {
+      requiresApproval = true;
+      approvalReason = `no single available package covers the needed quantity (best available: ${top.qFit.note}) — buying 1 unit will under-shop this ingredient`;
+    }
   } else if (candidates.length >= 2) {
     const [top, second] = candidates;
     if (top!.rankScore - second!.rankScore < AMBIGUITY_MARGIN) {

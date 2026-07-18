@@ -64,7 +64,15 @@ export function textRelevanceScore(ingredientName: string, description: string):
 }
 
 export interface QuantityFit {
-  score: number; // higher is better; see comment below for scale
+  score: number; // higher is better WITHIN a `covers` bucket only — see below
+  // Whether this package's size fully covers the needed quantity. `score`
+  // alone is NOT a reliable covers-vs-undersized signal: a wildly-oversized
+  // covering package (e.g. 20x the need) scores low (1/20), which can be
+  // numerically lower than a nearly-full undersized package (e.g. 90% of
+  // need scores 0.45) — callers that need "fully covers always beats
+  // undersized, regardless of surplus" must bucket on `covers` first and
+  // only compare `score` within a bucket.
+  covers: boolean;
   note: string;
 }
 
@@ -137,13 +145,16 @@ export function quantityFitScore(
     // decays toward 0 as the surplus grows, but never excludes.
     return {
       score: 1 / ratio,
+      covers: true,
       note: `covers needed quantity (${(ratio * 100).toFixed(0)}% of need)`,
     };
   }
   // Undersized package: not excluded (per spec, flagged not excluded when
-  // it's the best/only option), but scored below any covering package.
+  // it's the best/only option), but never ranked above a covering package —
+  // see the `covers` field doc above.
   return {
     score: ratio * 0.5,
+    covers: false,
     note: `package smaller than needed quantity (${(ratio * 100).toFixed(0)}% of need)`,
   };
 }
