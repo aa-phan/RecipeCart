@@ -67,6 +67,13 @@ export const config = {
     // sufficient even for a recipe this size, not just a rare outlier. 8000
     // gives real headroom rather than riding the edge.
     claudeMaxTokens: 8000,
+    // Max SDK-level retries for the reconcile Claude call (Spec 2 §3
+    // model_call_failed → ×3 backoff). The @anthropic-ai/sdk already retries
+    // transient errors (429 RateLimitError, 5xx InternalServerError,
+    // APIConnectionError) with exponential backoff — this just sets how many,
+    // rather than hand-rolling a backoff loop. A non-transient error (400/401)
+    // is not retried by the SDK regardless, and surfaces immediately.
+    claudeMaxRetries: 3,
     // Local Whisper model (Hugging Face Hub id, downloaded once on first use
     // and cached). Deliberately multilingual (not a "*.en" variant) — Spec 2
     // requires ASR/OCR auto-detection with no English special-casing.
@@ -101,6 +108,24 @@ export const config = {
     // Staleness window (A3-6): re-run search if a recipe has sat in
     // awaiting_review longer than this before a cart run uses its prices.
     searchStalenessWindowMs: 24 * 60 * 60_000,
+    // Safety margin below the documented daily ceilings (Spec 3 §17): the
+    // rate-limit guard refuses to START a run once usage reaches this fraction
+    // of a ceiling, leaving headroom rather than tripping the hard limit
+    // mid-run. Trivial at single-user volume; a real guard if usage ever grows.
+    rateLimitSafetyFraction: 0.95,
+  },
+
+  matching: {
+    // Claude-delegated materiality judgment (Spec 3 §2.2). Same model as
+    // reconcile for now; Haiku 4.5 is the natural cost lever here (see the
+    // recipecart-sonnet5-pricing-cliff note) since this is a short
+    // safe-vs-material classification, not a full extraction. The call is
+    // GATED (fires only when a substitution is actually flagged) and BATCHED
+    // (one call per recipe covering all flagged cases), so most clean-match
+    // recipes pay nothing extra.
+    materialityModel: "claude-sonnet-5",
+    materialityMaxTokens: 1024,
+    claudeMaxRetries: 3,
   },
 
   get krogerTokenStatePath() {
