@@ -74,6 +74,56 @@ TikTok UI chrome occupies predictable regions (right-edge icon column, bottom ca
 - JSON-only output, explicit `max_tokens` (~4000), validated against the schema. One corrective re-prompt on validation failure, then terminal `schema_validation_failed`.
 - Cost envelope: ~12–15k input tokens (8 frames ≈ 1,000–1,300 vision tokens each + <2k text), few hundred output → **well under $0.05/recipe** at Sonnet 5 introductory pricing. **On the `caption_sufficient` path, vision tokens drop to zero** — the call is just caption + transcript + schema/instruction overhead, well under 2k input tokens, cutting both cost and the dominant source of latency (frame extraction + OCR + vision tokens). Prompt caching deferred (negligible at single-user volume).
 
+### 2.5a Alternative investigated: self-hosted local LLM instead of Claude (TABLED, not adopted)
+
+Investigated 2026-07-18 as a possible way to remove the project's one remaining paid
+API dependency entirely, in the same spirit as the OCR/ASR local-only pivot (§6
+A2-1/A2-2). Real, live-tested against real evidence data via a throwaway spike
+(`spikes/ollama-reconcile-spike.ts`, kept in the repo) — not a paper evaluation.
+
+**Method:** `llama3.1:8b` via Ollama, run locally (CPU only, no GPU), tested three ways
+against real extracted evidence from two real TikTok videos:
+1. Plain prompting (same system prompt reconcile.ts sends Claude), no structural
+   constraint → model ignored the schema entirely, returned an unrelated generic
+   chatbot-shaped JSON object.
+2. Same model + Ollama's JSON-Schema-constrained output (`format: <schema>`, not just
+   `format: "json"` — grammar-constrained token sampling, forces the structural shape
+   regardless of the model's own instruction-following) → structurally perfect JSON,
+   but **fabricated a wrong recipe** ("chicken and onion stir fry" for a video that was
+   actually beef bulgogi) — worse than a format failure, since it directly violates
+   this project's core no-unsupported-inference guarantee. Input for this run included
+   291 real but noisy OCR blocks (from a video needing the vision-escalation path,
+   including garbage from degenerate too-small frames).
+3. Same model + same schema constraint, but against a **clean, caption-sufficient**
+   video (no OCR noise at all) → passed schema validation, correctly identified all 19
+   real ingredients (not a hallucinated substitute), reasonably clean canonical names,
+   plausible pantry-staple flagging.
+
+**Conclusion — genuinely mixed, not a clean yes or no:**
+- OCR noise was a real, confirmed contributing factor to the worst failure — clean
+  text input performs dramatically better than noisy input on the same model.
+- On clean caption-only input, quality is workable-verging-on-good for the happy path
+  this spec's `caption_sufficient` gate already isolates.
+- **Two disqualifying gaps remain, even on the clean case:** (a) latency — 172s for one
+  reconcile call on CPU, vs. this spec's 60–90s target for the *entire* pipeline; a
+  GPU-backed instance would help but changes the deployment shape and cost away from
+  the Railway-Hobby-tier target (Spec 4 §Cost target); (b) evidence-citation
+  precision — the ingredient list was factually right, but individual evidence
+  snippets sometimes pointed at transcript segments that didn't actually mention that
+  specific ingredient (right fact, imprecise citation) — a real gap against this
+  project's evidence-traceability guarantee, short of fabrication but not clean either.
+- **The harder case (vision-escalation path, needed when `caption_sufficient` is
+  false) was never validated positively** — the one real test that exercised it
+  (attempt 2 above) produced the worst failure of the three, and `llama3.1` has no
+  vision capability at all, so a genuinely fair test would need a different,
+  vision-capable local model not yet tried.
+
+**Status: tabled, not adopted.** Claude remains the reconciliation model for now. This
+is recorded as a real, partially-promising alternative worth revisiting — with a
+vision-capable model, and/or on GPU-backed hosting, and/or restricted only to the
+`caption_sufficient` path where it performed best — not a dead end, and not something
+to re-litigate from scratch next time; start from this writeup and the spike script.
+
 ## 3. Failure Classification `[P2]`
 
 | Class | Retry | Terminal behavior |

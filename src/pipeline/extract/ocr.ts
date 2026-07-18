@@ -28,7 +28,13 @@ export interface OcrBlock {
 let workerPromise: Promise<Worker> | undefined;
 function getWorker(): Promise<Worker> {
   if (!workerPromise) {
-    workerPromise = createWorker("eng");
+    // Without an explicit cachePath, tesseract.js downloads the language
+    // data file (eng.traineddata, ~5MB) into process.cwd() — polluting the
+    // repo root on every run. Redirect it next to the other local caches
+    // (SQLite db, encrypted token file) instead. `undefined` for the OEM
+    // arg keeps tesseract.js's own default engine mode — the 5MB file's
+    // *location* is the only thing being changed here.
+    workerPromise = createWorker("eng", undefined, { cachePath: config.dataDir });
   }
   return workerPromise;
 }
