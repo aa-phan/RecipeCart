@@ -12,14 +12,36 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
+import { parseCaption } from "../src/pipeline/extract/parse_caption.js";
 
 const execFileAsync = promisify(execFile);
 
+// Real URLs confirmed during the Phase 0 spike run (see files/spike-notes.md for
+// full findings). Kept here, labeled, so the spike can be re-run against the same
+// known-good/known-bad cases later (e.g. after a yt-dlp upgrade, to see if the
+// photo-mode gap has been fixed upstream).
 const TEST_URLS: string[] = [
-  // Fill in ~5 real public TikTok recipe URLs before running, e.g.:
-  // "https://www.tiktok.com/@someuser/video/1234567890123456789",
-  // "https://vm.tiktok.com/ZMabcdefg/",              // short link case
-  // "https://www.tiktok.com/@someuser/photo/1234567890123456789", // photo-mode case
+  // Standard video, caption HAS a full ingredient list -> captionSufficient: true.
+  // Confirms B2-1 (standard download/audio/frame extraction) and the positive path
+  // of the Spec 2 §2.3a caption-sufficiency gate.
+  "https://www.tiktok.com/@jalalsamfit/video/7564134038592605462",
+
+  // Short link (tiktok.com/t/... form) for the beef-bulgogi video below. Confirms
+  // yt-dlp's short-link redirect resolution (B2-1).
+  "https://www.tiktok.com/t/ZTSKEBAMy/",
+
+  // Same beef-bulgogi video, fully-expanded URL. Caption has NO ingredient list
+  // (recipe is only in the video itself) -> captionSufficient: false. Confirms the
+  // negative path of the caption-sufficiency gate, and that the short-link and
+  // expanded-link forms of the same video behave identically.
+  "https://www.tiktok.com/@shreddedandfed/video/7650230773512965393?q=meal%20prep%20recipe&t=1784319852681",
+
+  // Photo-mode/slideshow post; recipe is only in the slide images, caption has no
+  // ingredient list. CONFIRMED FAILING as of yt-dlp 2026.07.04: the /photo/<id> URL
+  // pattern isn't recognized at all (falls back to the generic extractor and
+  // errors). Kept here specifically to re-check after future yt-dlp upgrades —
+  // see files/spike-notes.md "B2-2" for the full writeup and workaround attempts.
+  "https://www.tiktok.com/@success.fitness/photo/7547822272153799954?q=meal%20prep%20recipe&t=1784319852681",
 ];
 
 const OUT_DIR = path.resolve("spikes/tmp");
@@ -32,6 +54,9 @@ interface SpikeResult {
   durationS?: number;
   hasAudio?: boolean;
   frameCount?: number;
+  caption?: string;
+  captionSufficient?: boolean;
+  captionMatchedLines?: string[];
   error?: string;
 }
 
@@ -62,6 +87,17 @@ async function runOne(url: string, index: number): Promise<SpikeResult> {
       // Photo-mode posts typically show up as a slideshow with no video
       // stream / duration, or as an image-only format list.
       result.isPhotoMode = !info.duration || info.duration === 0;
+
+      // Spec 2 §2.3a: check the caption-sufficiency gate against the real
+      // caption yt-dlp pulled down, using the actual parse_caption module —
+      // gives a first real signal on the A2-7 threshold.
+      const caption: string | undefined = info.description ?? info.caption;
+      result.caption = caption;
+      if (caption) {
+        const captionCheck = parseCaption(caption);
+        result.captionSufficient = captionCheck.captionSufficient;
+        result.captionMatchedLines = captionCheck.matchedLines.map((m) => m.text);
+      }
     }
 
     const videoFile = mediaFiles.find((f) => /\.(mp4|webm|mov)$/i.test(f));
@@ -139,9 +175,19 @@ async function main() {
       photoMode: r.isPhotoMode ?? "?",
       hasAudio: r.hasAudio ?? "?",
       frames: r.frameCount ?? "?",
+      captionSufficient: r.captionSufficient ?? "?",
       error: r.error ?? "",
     })),
   );
+  for (const r of results) {
+    if (r.caption) {
+      console.log(`\n--- caption for ${r.url} ---`);
+      console.log(r.caption);
+      console.log(
+        `captionSufficient=${r.captionSufficient} matchedLines=${JSON.stringify(r.captionMatchedLines)}`,
+      );
+    }
+  }
   console.log(
     "\nEyeball the extracted frames under spikes/tmp/job-*/frames/ for quality.\n" +
       "Write findings to files/spike-notes.md and mark B2-1/B2-2 resolved or escalated.",
