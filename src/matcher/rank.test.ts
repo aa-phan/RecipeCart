@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeUnitPrice, quantityFitScore, textRelevanceScore } from "./rank.js";
+import {
+  computeUnitPrice,
+  packageSizeMagnitude,
+  quantityFitScore,
+  textRelevanceScore,
+} from "./rank.js";
 
 describe("textRelevanceScore", () => {
   it("scores full-phrase matches highly", () => {
@@ -55,6 +60,48 @@ describe("quantityFitScore", () => {
   it("treats a null unit as count", () => {
     const fit = quantityFitScore({ value: 2, unit: null, raw_text: "2" }, "4 count");
     expect(fit).not.toBeNull();
+  });
+
+  describe("cross-category density conversion", () => {
+    it("converts a volume quantity to weight via a known ingredient density", () => {
+      // 3 tsp salt ~= 3 * 4.92892 mL * 1.2 g/mL ~= 17.7g, well under a 26oz (737g) package.
+      const fit = quantityFitScore({ value: 3, unit: "tsp", raw_text: "3 tsp" }, "26 oz", "salt");
+      expect(fit).not.toBeNull();
+      expect(fit!.score).toBeGreaterThan(0);
+    });
+
+    it("still returns null for an unknown ingredient with no density entry", () => {
+      const fit = quantityFitScore(
+        { value: 3, unit: "tsp", raw_text: "3 tsp" },
+        "26 oz",
+        "some unlisted spice blend",
+      );
+      expect(fit).toBeNull();
+    });
+
+    it("still returns null when no canonicalName is passed at all (back-compat)", () => {
+      const fit = quantityFitScore({ value: 3, unit: "tsp", raw_text: "3 tsp" }, "26 oz");
+      expect(fit).toBeNull();
+    });
+
+    it("never bridges count across categories, even with a density available", () => {
+      const fit = quantityFitScore({ value: 2, unit: null, raw_text: "2" }, "26 oz", "salt");
+      expect(fit).toBeNull();
+    });
+  });
+});
+
+describe("packageSizeMagnitude", () => {
+  it("returns the parsed base quantity for a parseable size", () => {
+    expect(packageSizeMagnitude("1 lb")).toBeCloseTo(453.592, 2);
+  });
+
+  it("orders smaller packages before larger ones within the same category", () => {
+    expect(packageSizeMagnitude("2 oz")).toBeLessThan(packageSizeMagnitude("9.25 oz"));
+  });
+
+  it("treats an unparseable size as unknown-large (sorts last)", () => {
+    expect(packageSizeMagnitude("assorted")).toBe(Infinity);
   });
 });
 

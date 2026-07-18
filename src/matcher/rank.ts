@@ -3,7 +3,8 @@
 // no external calls — Claude-delegated disambiguation and materiality are
 // explicitly deferred to P2 per spec.
 import type { Ingredient } from "../pipeline/schema.js";
-import { normalizeUnit, parseSizeString } from "./units.js";
+import { normalizeUnit, parseSizeString, type UnitCategory } from "./units.js";
+import { densityForIngredient } from "./density.js";
 
 // src/pipeline/schema.ts (owned by the extraction pipeline agent) doesn't
 // export a standalone Quantity type, so derive it from Ingredient rather
@@ -67,13 +68,44 @@ export interface QuantityFit {
   note: string;
 }
 
+/** Converts a base-unit quantity across the volume/weight split using a
+ * known per-ingredient density (Spec 3 §2.2 step 4: "standard densities like
+ * flour ≈120g/cup") — e.g. teaspoons of salt to grams of salt, so it can be
+ * compared against a package sold by weight. Returns null (no guess) when
+ * either category is "count" (nothing to bridge with a density) or the
+ * ingredient isn't on the explicit density list (density.ts). */
+function convertAcrossCategory(
+  baseQuantity: number,
+  fromCategory: UnitCategory,
+  toCategory: UnitCategory,
+  canonicalName: string | undefined,
+): number | null {
+  if (fromCategory === toCategory) return baseQuantity;
+  if (fromCategory === "count" || toCategory === "count") return null;
+  if (!canonicalName) return null;
+
+  const gramsPerMl = densityForIngredient(canonicalName);
+  if (gramsPerMl === null) return null;
+
+  // Base units are always grams (weight) or milliliters (volume) — see
+  // units.ts's NormalizedUnit doc.
+  return fromCategory === "volume" ? baseQuantity * gramsPerMl : baseQuantity / gramsPerMl;
+}
+
 /** Quantity-to-package-size fit ("closest-over" rule): prefer the smallest
  * package that covers the needed quantity. Returns null when the
  * ingredient's quantity/unit or the package size string aren't both
- * confidently parseable into the same unit category — per spec, that means
- * "skip the boost," not "penalize the candidate." A bare quantity with no
- * unit (e.g. "2 eggs") is treated as a count. */
-export function quantityFitScore(quantity: Quantity, size: string): QuantityFit | null {
+ * confidently parseable, or when they're in different unit categories with
+ * no known density to bridge them — per spec, that means "skip the boost,"
+ * not "penalize the candidate." A bare quantity with no unit (e.g. "2 eggs")
+ * is treated as a count. `canonicalName` (optional) enables the
+ * volume<->weight density conversion above; omit it to keep the old
+ * same-category-only behavior. */
+export function quantityFitScore(
+  quantity: Quantity,
+  size: string,
+  canonicalName?: string,
+): QuantityFit | null {
   if (quantity.value === null || quantity.value <= 0) return null;
 
   const ingredientUnit =
@@ -84,9 +116,19 @@ export function quantityFitScore(quantity: Quantity, size: string): QuantityFit 
 
   const parsedSize = parseSizeString(size);
   if (!parsedSize) return null;
-  if (parsedSize.category !== ingredientUnit.category) return null;
 
-  const neededBase = quantity.value * ingredientUnit.factor;
+  let neededBase = quantity.value * ingredientUnit.factor;
+  if (parsedSize.category !== ingredientUnit.category) {
+    const converted = convertAcrossCategory(
+      neededBase,
+      ingredientUnit.category,
+      parsedSize.category,
+      canonicalName,
+    );
+    if (converted === null) return null;
+    neededBase = converted;
+  }
+
   if (neededBase <= 0) return null;
   const ratio = parsedSize.baseQuantity / neededBase;
 
@@ -112,4 +154,20 @@ export function computeUnitPrice(price: number, size: string): number | undefine
   const parsed = parseSizeString(size);
   if (!parsed || parsed.baseQuantity <= 0) return undefined;
   return price / parsed.baseQuantity;
+}
+
+/** Package-size magnitude for the no-stated-quantity default rule (Spec 3
+ * §2.2 step 3a): when an ingredient has no quantity at all, there is no
+ * quantity-to-fit, so smallest-package-first is the deterministic
+ * fallback — deliberately no cross-category conversion here (unlike
+ * quantityFitScore above), comparing raw base quantities as-is even across
+ * categories. That's a known, accepted simplification: candidate sets for
+ * one ingredient search are almost always unit-homogeneous in practice
+ * (spices are all sold by weight, milk/oil all by volume), so an exact
+ * apples-to-apples comparison isn't worth the complexity here the way it is
+ * for quantityFitScore's real quantity-fit math. Unparseable sizes sort last
+ * (treated as unknown-large) rather than being excluded. */
+export function packageSizeMagnitude(size: string): number {
+  const parsed = parseSizeString(size);
+  return parsed ? parsed.baseQuantity : Infinity;
 }

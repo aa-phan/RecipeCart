@@ -176,6 +176,53 @@ describe("matchIngredient", () => {
     expect(result.requiresApproval).toBe(true);
     expect(result.approvalReason).toMatch(/network down/);
   });
+
+  it("defaults to the smallest package (cheapest tiebreak) and skips approval when no quantity is stated", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "big",
+          upc: "big",
+          description: "Kroger Heavy Whipping Cream (Large)",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 5.99 },
+              size: "32 fl oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+        product({
+          productId: "small",
+          upc: "small",
+          description: "Kroger Heavy Whipping Cream (Small)",
+          items: [
+            {
+              itemId: "2",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 3.49 },
+              size: "8 fl oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({ quantity: { value: null, unit: null, raw_text: "a splash" } }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+
+    expect(result.requiresApproval).toBe(false);
+    expect(result.candidates[0]!.productId).toBe("small");
+    expect(result.candidates[0]!.reason).toMatch(/no quantity stated/);
+  });
 });
 
 describe("matchRecipe", () => {

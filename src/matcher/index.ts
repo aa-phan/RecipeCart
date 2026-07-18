@@ -10,7 +10,12 @@ import { getAppToken } from "../kroger/auth.js";
 import { searchProducts } from "../kroger/client.js";
 import { getDb } from "../platform/db.js";
 import { logger } from "../platform/logger.js";
-import { computeUnitPrice, quantityFitScore, textRelevanceScore } from "./rank.js";
+import {
+  computeUnitPrice,
+  packageSizeMagnitude,
+  quantityFitScore,
+  textRelevanceScore,
+} from "./rank.js";
 import type { IngredientMatch, ProductCandidate } from "./types.js";
 
 export type { IngredientMatch, ProductCandidate } from "./types.js";
@@ -31,6 +36,18 @@ function compareCandidates(a: ProductCandidate, b: ProductCandidate): number {
   return diff;
 }
 
+/** No-stated-quantity default ordering (Spec 3 §2.2 step 3a): smallest
+ * package first, cheapest price as the tiebreak — an arbitrary but
+ * deterministic choice, not a quality judgment (an "organic" or other
+ * preference-based tiebreak is a natural P3 extension once Spec 1
+ * preferences exist to drive it). */
+function compareBySmallestPackage(a: ProductCandidate, b: ProductCandidate): number {
+  const diff = packageSizeMagnitude(a.size) - packageSizeMagnitude(b.size);
+  if (diff !== 0) return diff;
+  if (a.price != null && b.price != null) return a.price - b.price;
+  return 0;
+}
+
 /** Matches a single ingredient against the Kroger catalog and ranks
  * candidates. Exported separately from matchRecipe so callers with their
  * own ingredient ids (e.g. DB rows) can call it directly. */
@@ -45,6 +62,14 @@ export async function matchIngredient(
   // rather than skipping the ingredient, and flag it for review below.
   const canonicalName = ingredient.canonical_name_en.value ?? ingredient.raw_text;
   const nameUncertain = ingredient.canonical_name_en.value === null;
+  // No stated amount (vague quantity, e.g. "a pinch", or genuinely never
+  // given) means quantityFitScore never contributes a real signal, so a text
+  // score tie between near-identical branded options isn't an actual
+  // ambiguity to send to human review — it's "there's nothing to decide on."
+  // Spec 3 §2.2 step 3a: default deterministically to the smallest package,
+  // cheapest-price tiebreak, no unit conversion needed since there's no
+  // target quantity to convert toward.
+  const hasQuantity = ingredient.quantity.value !== null && ingredient.quantity.value > 0;
 
   if (!canonicalName || canonicalName.trim().length === 0) {
     return {
@@ -67,7 +92,7 @@ export async function matchIngredient(
       for (const item of product.items) {
         if (item.inventory?.stockLevel === "TEMPORARILY_OUT_OF_STOCK") continue;
 
-        const qFit = quantityFitScore(ingredient.quantity, item.size);
+        const qFit = quantityFitScore(ingredient.quantity, item.size, canonicalName);
         const price = item.price?.regular ?? null;
         const unitPrice = price != null ? computeUnitPrice(price, item.size) : undefined;
         const rankScore = textScore * 10 + (qFit ? qFit.score * 3 : 0);
@@ -101,7 +126,7 @@ export async function matchIngredient(
     };
   }
 
-  candidates.sort(compareCandidates);
+  candidates.sort(hasQuantity ? compareCandidates : compareBySmallestPackage);
   candidates = candidates.slice(0, MAX_CANDIDATES);
 
   let requiresApproval = false;
@@ -110,6 +135,10 @@ export async function matchIngredient(
   if (candidates.length === 0) {
     requiresApproval = true;
     approvalReason = "no in-stock candidates found a relevant text match for this ingredient";
+  } else if (!hasQuantity) {
+    // Deterministic by construction (smallest package, cheapest tiebreak) —
+    // never flagged as ambiguous just because there was nothing to score.
+    candidates[0]!.reason = "no quantity stated — smallest package selected";
   } else if (candidates.length >= 2) {
     const [top, second] = candidates;
     if (top!.rankScore - second!.rankScore < AMBIGUITY_MARGIN) {
