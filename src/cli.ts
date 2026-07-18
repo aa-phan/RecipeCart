@@ -7,14 +7,21 @@
 //   recipecart set-store           -> kroger_client.searchLocations() + save locationId
 //   recipecart <tiktok-url>        -> extract() + matcher, writes review file
 //   recipecart approve <recipe-id> -> cart runner, prints itemized results
+import crypto from "node:crypto";
 import { Command } from "commander";
 import { logger } from "./platform/logger.js";
 import { config } from "./platform/config.js";
+import { getDb } from "./platform/db.js";
 import * as krogerAuth from "./kroger/auth.js";
 import * as krogerClient from "./kroger/client.js";
 import { waitForCallback } from "./kroger/callback_server.js";
 import { saveToken, loadToken, isExpiredOrMissing } from "./kroger/token_store.js";
-import { saveStoreLocation } from "./kroger/store_config.js";
+import { saveStoreLocation, loadStoreLocation } from "./kroger/store_config.js";
+import { runCartApproval, type ApprovedCartItem } from "./kroger/cart_runner.js";
+import { extract } from "./pipeline/extract/index.js";
+import type { Recipe } from "./pipeline/schema.js";
+import { matchRecipeAndPersist, renderMatchesTable } from "./matcher/index.js";
+import type { ProductCandidate } from "./matcher/types.js";
 
 const program = new Command();
 
@@ -96,14 +103,111 @@ program
     }
   });
 
+interface ProductMatchRow {
+  ingredient_id: string;
+  canonical_name: string | null;
+  candidates_json: string;
+  requires_approval: number;
+  approval_reason: string | null;
+}
+
+/** P1 has no review-file-editing UX yet (deferred per phases.md — "confidence
+ * UX... anything not needed to complete one honest end-to-end run"). Until
+ * that exists, `approve` treats every non-ambiguous match's top-ranked
+ * candidate as approved, and skips anything the matcher flagged
+ * requires_approval — those genuinely need human disambiguation before this
+ * command can honestly call them approved, so they're reported, not guessed.
+ * Quantity is fixed at 1 package per ingredient for P1 — the full
+ * purchase-quantity math (Spec 3 §10) isn't wired end-to-end yet. */
+function selectApprovedItems(recipeId: string): {
+  approved: ApprovedCartItem[];
+  skipped: { name: string; reason: string }[];
+} {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT pm.ingredient_id, i.canonical_name, pm.candidates_json, pm.requires_approval, pm.approval_reason
+       FROM product_matches pm
+       JOIN ingredients i ON i.id = pm.ingredient_id
+       WHERE i.recipe_id = ?`,
+    )
+    .all(recipeId) as unknown as ProductMatchRow[];
+
+  const approved: ApprovedCartItem[] = [];
+  const skipped: { name: string; reason: string }[] = [];
+
+  for (const row of rows) {
+    const name = row.canonical_name ?? row.ingredient_id;
+    if (row.requires_approval) {
+      skipped.push({ name, reason: row.approval_reason ?? "requires manual review" });
+      continue;
+    }
+    const candidates = JSON.parse(row.candidates_json) as ProductCandidate[];
+    const top = candidates[0];
+    if (!top) {
+      skipped.push({ name, reason: "no candidates found" });
+      continue;
+    }
+    approved.push({ upc: top.upc, quantity: 1, ingredientId: row.ingredient_id });
+  }
+
+  return { approved, skipped };
+}
+
 program
   .command("approve")
   .argument("<recipe-id>", "recipe id to approve for cart add")
   .description("Add approved items to the real Kroger cart and print itemized results")
   .action(async (recipeId: string) => {
-    logger.info("approve command not yet implemented — see Step 1e", { recipeId });
-    process.exitCode = 1;
+    try {
+      const { approved, skipped } = selectApprovedItems(recipeId);
+
+      for (const item of skipped) {
+        console.log(`Skipping "${item.name}" — ${item.reason}. Review it manually.`);
+      }
+
+      if (approved.length === 0) {
+        console.log("Nothing auto-approvable to add — nothing was sent to the cart.");
+        return;
+      }
+
+      // Deterministic per recipe so re-running `approve` on the same recipe
+      // is idempotent by construction (Spec 3 §17) rather than by accident.
+      const idempotencyKey = `cart-approve-${recipeId}`;
+      const result = await runCartApproval(recipeId, approved, idempotencyKey);
+
+      console.log(`\nCart result: ${result.status}`);
+      for (const r of result.results) {
+        console.log(
+          `  ${r.status === "added" ? "✓" : "✗"} ${r.upc}${r.reason ? ` — ${r.reason}` : ""}`,
+        );
+      }
+      console.log(result.summary);
+
+      if (result.status === "failed" || result.status === "requires_user_intervention") {
+        process.exitCode = 1;
+      }
+    } catch (err) {
+      logger.error("Cart approval failed", {
+        recipeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      process.exitCode = 1;
+    }
   });
+
+function ingredientsTableRows(recipeId: string, recipe: Recipe) {
+  return recipe.ingredients.map((ing) => ({
+    id: crypto.randomUUID(),
+    recipe_id: recipeId,
+    canonical_name: ing.canonical_name_en.value,
+    quantity_value: ing.quantity.value,
+    quantity_unit: ing.quantity.unit,
+    raw_text: ing.raw_text,
+    is_pantry_staple: ing.is_pantry_staple ? 1 : 0,
+    evidence_json: JSON.stringify(ing.canonical_name_en.evidence ?? []),
+  }));
+}
 
 program
   .argument("[tiktok-url]", "a TikTok recipe URL to extract and match")
@@ -112,10 +216,55 @@ program
       program.help();
       return;
     }
-    logger.info("extraction pipeline not yet implemented — see src/pipeline (Step 1b/1c)", {
-      tiktokUrl,
-    });
-    process.exitCode = 1;
+
+    const store = loadStoreLocation();
+    if (!store) {
+      console.error("No Kroger store configured — run `recipecart set-store <zip-code>` first.");
+      process.exitCode = 1;
+      return;
+    }
+
+    try {
+      const jobId = crypto.randomUUID();
+      logger.info("extraction: starting", { tiktokUrl, jobId });
+      const { recipe, recipeId } = await extract(tiktokUrl, jobId);
+
+      if (recipe.result_type === "not_a_recipe") {
+        console.log(`Not a recipe: ${recipe.not_a_recipe_reason ?? "no reason given"}`);
+        return;
+      }
+
+      console.log(`Extracted: ${recipe.title?.value ?? "(untitled)"} — recipe id: ${recipeId}`);
+
+      const db = getDb();
+      const insert = db.prepare(
+        `INSERT INTO ingredients
+           (id, recipe_id, canonical_name, quantity_value, quantity_unit, raw_text, is_pantry_staple, evidence_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const row of ingredientsTableRows(recipeId, recipe)) {
+        insert.run(
+          row.id,
+          row.recipe_id,
+          row.canonical_name,
+          row.quantity_value,
+          row.quantity_unit,
+          row.raw_text,
+          row.is_pantry_staple,
+          row.evidence_json,
+        );
+      }
+
+      const matches = await matchRecipeAndPersist(recipeId, store.locationId);
+      console.log("\n" + renderMatchesTable(matches));
+      console.log(`\nRun \`recipecart approve ${recipeId}\` to add approved items to your cart.`);
+    } catch (err) {
+      logger.error("Extraction/matching failed", {
+        tiktokUrl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      process.exitCode = 1;
+    }
   });
 
 program.parseAsync(process.argv);
