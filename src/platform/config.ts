@@ -58,7 +58,15 @@ export const config = {
       bottomCaptionBand: { xMin: 0.0, xMax: 1.0, yMin: 0.78, yMax: 1.0 },
     },
     claudeModel: "claude-sonnet-5",
-    claudeMaxTokens: 4000,
+    // Live-tested (2026-07-18), thinking disabled (reconcile.ts): a real
+    // 20-ingredient caption-sufficient recipe (evidence array per field,
+    // steps, dietary_attributes) hit stop_reason "max_tokens" at 4000 output
+    // tokens, truncated mid-step, on a request with byte-identical input to
+    // one that HAD completed successfully moments earlier — response length
+    // varies run to run even with thinking off, so 4000 isn't reliably
+    // sufficient even for a recipe this size, not just a rare outlier. 8000
+    // gives real headroom rather than riding the edge.
+    claudeMaxTokens: 8000,
     // Local Whisper model (Hugging Face Hub id, downloaded once on first use
     // and cached). Deliberately multilingual (not a "*.en" variant) — Spec 2
     // requires ASR/OCR auto-detection with no English special-casing.

@@ -176,6 +176,14 @@ export async function reconcile(input: ReconcileInput): Promise<Recipe> {
   const first = await anthropic.messages.create({
     model: config.extraction.claudeModel,
     max_tokens: config.extraction.claudeMaxTokens,
+    // Sonnet 5 runs adaptive (extended) thinking by default when `thinking`
+    // is omitted — a silent behavior change from Sonnet 4.6, confirmed live:
+    // a real call spent 959 of its 4000 max_tokens on thinking before
+    // writing any JSON, truncating the response mid-recipe
+    // (stop_reason: "max_tokens"). This is a deterministic extraction task
+    // with no benefit from reasoning, so thinking is disabled outright
+    // rather than tuning effort — every token goes to the actual output.
+    thinking: { type: "disabled" },
     system: SYSTEM_PROMPT,
     messages,
   });
@@ -221,6 +229,7 @@ export async function reconcile(input: ReconcileInput): Promise<Recipe> {
     const second = await anthropic.messages.create({
       model: config.extraction.claudeModel,
       max_tokens: config.extraction.claudeMaxTokens,
+      thinking: { type: "disabled" },
       system: SYSTEM_PROMPT,
       messages,
     });

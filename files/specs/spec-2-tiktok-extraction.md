@@ -72,7 +72,38 @@ TikTok UI chrome occupies predictable regions (right-edge icon column, bottom ca
 - **One call per attempt.** Inputs: caption/description, cleaned transcript (segment timestamps), deduplicated OCR blocks (text + frame ref + position + confidence, chrome-tagged) — empty when `caption_sufficient`, ≤8 escalation frames as images — also empty when `caption_sufficient`.
 - System prompt: fixes the §4 schema; explicit instruction to never infer unevidenced quantities/ingredients — `null` + reason instead; **evidence-source conflict rule, in priority order: on-screen text (OCR) > caption > narration (ASR)** when two sources disagree on the same value — captions are convenient but sometimes stale/copy-pasted from a different video or recipe, so a directly-shown on-screen quantity still wins; when only caption evidence exists for a field (the `caption_sufficient` path), it's used as given, `source_type: caption`; `not_a_recipe` classification path.
 - JSON-only output, explicit `max_tokens` (~4000), validated against the schema. One corrective re-prompt on validation failure, then terminal `schema_validation_failed`.
-- Cost envelope: ~12–15k input tokens (8 frames ≈ 1,000–1,300 vision tokens each + <2k text), few hundred output → **well under $0.05/recipe** at Sonnet 5 introductory pricing. **On the `caption_sufficient` path, vision tokens drop to zero** — the call is just caption + transcript + schema/instruction overhead, well under 2k input tokens, cutting both cost and the dominant source of latency (frame extraction + OCR + vision tokens). Prompt caching deferred (negligible at single-user volume).
+- Cost envelope, **live-measured (2026-07-18)** against a real 20-ingredient
+  `caption_sufficient` recipe (each ingredient carrying a full evidence array —
+  this is not a minimal case): 3,003 input tokens, 3,945 output tokens
+  (`thinking` explicitly disabled — see below). At Sonnet 5 introductory
+  pricing ($2/$10 per MTok through 2026-08-31): **~$0.046/recipe**, inside the
+  ~$0.05 budget but with only ~9% margin. **At standard post-introductory
+  pricing ($3/$15 per MTok), the same call is ~$0.068/recipe — ~36% OVER
+  budget.** The original "few hundred output tokens" estimate this replaced
+  was wrong by an order of magnitude — it didn't account for a real
+  20-ingredient recipe's full evidence-per-field payload. Revisit pricing
+  (or trim the evidence payload / consider Haiku 4.5 for this call — already
+  flagged as post-MVP in `phases.md`) before the introductory pricing window
+  closes on 2026-08-31.
+- **`thinking` must be explicitly disabled** (`thinking: {type: "disabled"}`)
+  on every `reconcile` call. Found live: Sonnet 5 runs adaptive thinking by
+  default when the `thinking` param is omitted at all — a silent behavior
+  change from Sonnet 4.6 — which draws from the *same* `max_tokens` budget as
+  the JSON output. A real call spent 959 of 4000 max_tokens on thinking
+  before writing any JSON, truncating the response mid-recipe
+  (`stop_reason: "max_tokens"`, corrective re-prompt then failed the same
+  way — a terminal failure on a perfectly fine video). This is a pure
+  structured-extraction task with no benefit from reasoning, so thinking is
+  disabled outright rather than tuned via `effort`.
+- `claudeMaxTokens` is **8000**, not the original 4000. Live-tested: even
+  with thinking disabled, a byte-identical request to one that had just
+  completed successfully hit `stop_reason: "max_tokens"` at 4000 on a
+  second attempt — output length varies run to run independent of thinking,
+  so 4000 was riding the edge for a recipe this size, not safely clear of it.
+- **On the `caption_sufficient` path, vision tokens drop to zero** — the call
+  is just caption + transcript + schema/instruction overhead, cutting both
+  cost and the dominant source of latency (frame extraction + OCR + vision
+  tokens). Prompt caching deferred (negligible at single-user volume).
 
 ### 2.5a Alternative investigated: self-hosted local LLM instead of Claude (TABLED, not adopted)
 
