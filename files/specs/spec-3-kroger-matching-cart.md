@@ -204,10 +204,16 @@ standard OAuth2:
   OAuth2 redirect, no special story needed.
 - [ ] **A3-6 — Search staleness window.** Unchanged. Recommendation: 24h default,
   config value.
-- [ ] **A3-7 — Exact OAuth2 scope strings and token TTLs.** Confirm from Kroger's
-  developer docs (`Understanding OAuth2`, `Auth Code Tutorial`) during P1
-  implementation — not independently verified in this spec beyond confirming the
-  Authorization Code / Client Credentials grant-type split.
+- [x] **A3-7 — Exact OAuth2 scope strings and token TTLs. RESOLVED — verified live**
+  during P1 implementation (2026-07-18), not just read from docs: `product.compact`
+  is the correct Client Credentials scope (Products/Locations); `cart.basic:write` is
+  the correct Authorization Code scope (a guessed `profile.compact` scope was
+  rejected by the authorize endpoint with `invalid_scope`, confirming this needed
+  live verification rather than trusting the docs page). Client Credentials tokens
+  expire in 1800s (30 min). Full OAuth2 loop (authorize → user login/consent →
+  callback → code exchange → encrypted token storage) and a real `addToCart` call
+  both completed successfully end-to-end against the live API and the target Dallas
+  store — see `src/kroger/` and its test suite.
 
 ## 6. Known Limitations (replaces the original "Blockers" section)
 
