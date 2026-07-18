@@ -61,6 +61,113 @@ function compareBySmallestPackage(a: ProductCandidate, b: ProductCandidate): num
 interface ScoredCandidate {
   candidate: ProductCandidate;
   qFit: QuantityFit | null;
+  // True when this candidate only turned up via the broadened fallback
+  // search (below), not the ingredient's own specific-name search — always
+  // flagged for approval regardless of quantity fit, since dropping a
+  // descriptive word to find it means we can no longer be confident it's
+  // the same product (Spec 3 §2.2: a different-ingredient stand-in is a
+  // *material* substitution, "when in doubt → material" — Claude-delegated
+  // materiality judgment is [P2], not something this deterministic ranking
+  // can safely decide on its own).
+  fromBroadenedSearch: boolean;
+}
+
+interface BroadenedSearch {
+  term: string;
+  // The word dropped to build `term` — e.g. "cheese" for "garlic & herb
+  // cream cheese" -> "garlic & herb cream". Kept separately so callers can
+  // still REQUIRE it in a candidate's description (see
+  // searchAndBuildCandidates's `requiredWord`): broadening the QUERY sent to
+  // Kroger is safe (it only widens what comes back), but without this
+  // requirement, a partial-token-overlap candidate that's missing the one
+  // word that actually identifies the product type can score just as well
+  // as a real match. Confirmed live: dropping "cheese" from "garlic & herb
+  // cream cheese" to search "garlic & herb cream" surfaced both a genuine
+  // alternative (a garlic & herb spreadable cheese under a different brand)
+  // AND "Soules Kitchen Creamy Garlic & Herb CHICKEN" at an IDENTICAL local
+  // relevance score (3 of 4 tokens matched either way — "cream" fuzzy-
+  // matches "creamy" regardless of whether it's describing a cheese or a
+  // meat dish). Requiring "cheese" specifically in the description throws
+  // out the chicken while keeping the real cheese alternatives.
+  droppedWord: string;
+}
+
+/** Drops the last whitespace-separated word of a multi-word ingredient name
+ * to build a broader fallback search term (Spec 3 §2.2 step 2) — e.g.
+ * "garlic & herb cream cheese" -> "garlic & herb cream". Live-tested: this
+ * one-step broadening reliably surfaces genuine near-alternatives Kroger's
+ * own search missed on the exact name (a "cream cheese" flavor also sold as
+ * a "spreadable cheese"/"gourmet cheese") without pulling in the noise a
+ * more aggressive broadening does — dropping to just the flavor words alone
+ * (e.g. "garlic herb") returned pasta sauce, seasoning shakers, and pork
+ * chops at the exact same text-relevance score as the real matches, with no
+ * reliable way to tell them apart locally. Returns null for a single-word
+ * name (nothing left to drop) or when the search term didn't actually
+ * change (nothing usefully broadened).
+ */
+function broadenedSearchTerm(canonicalName: string): BroadenedSearch | null {
+  const words = canonicalName.trim().split(/\s+/);
+  if (words.length < 2) return null;
+  const term = words.slice(0, -1).join(" ").trim();
+  if (term.length === 0) return null;
+  return { term, droppedWord: words[words.length - 1]!.toLowerCase() };
+}
+
+/** Searches Kroger and builds scored candidates for one query term. Always
+ * scores text relevance and quantity fit against `scoringName` (the
+ * ingredient's real canonical name) even when `searchTerm` is a broadened
+ * fallback query — the broadening only widens what Kroger's own search
+ * returns, it never loosens the local relevance/quantity checks.
+ * `requiredWord`, when set, additionally excludes any candidate whose
+ * description doesn't contain it — see BroadenedSearch.droppedWord's doc for
+ * why this matters specifically for broadened-search candidates. */
+async function searchAndBuildCandidates(
+  searchTerm: string,
+  scoringName: string,
+  quantity: Ingredient["quantity"],
+  useSmallestPackageDefault: boolean,
+  locationId: string,
+  appToken: string,
+  fromBroadenedSearch: boolean,
+  requiredWord?: string,
+): Promise<ScoredCandidate[]> {
+  const response = await searchProducts(searchTerm, locationId, appToken, SEARCH_LIMIT);
+  const results: ScoredCandidate[] = [];
+
+  for (const product of response.data) {
+    if (requiredWord && !product.description.toLowerCase().includes(requiredWord)) continue;
+
+    const textScore = textRelevanceScore(scoringName, product.description);
+    if (textScore === null) continue; // no meaningful overlap — excluded, not just penalized
+
+    for (const item of product.items) {
+      if (item.inventory?.stockLevel === "TEMPORARILY_OUT_OF_STOCK") continue;
+
+      const qFit = useSmallestPackageDefault
+        ? null
+        : quantityFitScore(quantity, item.size, scoringName);
+      const price = item.price?.regular ?? null;
+      const unitPrice = price != null ? computeUnitPrice(price, item.size) : undefined;
+      const rankScore = textScore * 10 + (qFit ? qFit.score * 3 : 0);
+
+      results.push({
+        candidate: {
+          productId: product.productId,
+          upc: product.upc,
+          name: product.description,
+          brand: product.brand,
+          price,
+          size: item.size,
+          unitPrice,
+          rankScore,
+          reason: qFit?.note,
+        },
+        qFit,
+        fromBroadenedSearch,
+      });
+    }
+  }
+  return results;
 }
 
 /** Buckets a candidate: fully-covers-the-need (0) always beats an undersized
@@ -133,36 +240,44 @@ export async function matchIngredient(
   }
 
   let scored: ScoredCandidate[] = [];
+  let broadenedTermUsed: string | null = null;
   try {
-    const response = await searchProducts(canonicalName, locationId, appToken, SEARCH_LIMIT);
-    for (const product of response.data) {
-      const textScore = textRelevanceScore(canonicalName, product.description);
-      if (textScore === null) continue; // no meaningful overlap — excluded, not just penalized
+    scored = await searchAndBuildCandidates(
+      canonicalName,
+      canonicalName,
+      ingredient.quantity,
+      useSmallestPackageDefault,
+      locationId,
+      appToken,
+      false,
+    );
 
-      for (const item of product.items) {
-        if (item.inventory?.stockLevel === "TEMPORARILY_OUT_OF_STOCK") continue;
-
-        const qFit = useSmallestPackageDefault
-          ? null
-          : quantityFitScore(ingredient.quantity, item.size, canonicalName);
-        const price = item.price?.regular ?? null;
-        const unitPrice = price != null ? computeUnitPrice(price, item.size) : undefined;
-        const rankScore = textScore * 10 + (qFit ? qFit.score * 3 : 0);
-
-        scored.push({
-          candidate: {
-            productId: product.productId,
-            upc: product.upc,
-            name: product.description,
-            brand: product.brand,
-            price,
-            size: item.size,
-            unitPrice,
-            rankScore,
-            reason: qFit?.note,
-          },
-          qFit,
-        });
+    // Only reach for a broadened search when it's actually load-bearing: a
+    // core (non-seasoning) ingredient with a real quantity, where nothing
+    // in the specific-name results covers the need. Cheap to check before
+    // spending a second Kroger call.
+    const coveredAlready = scored.some((s) => s.qFit?.covers);
+    if (!useSmallestPackageDefault && scored.some((s) => s.qFit !== null) && !coveredAlready) {
+      const broadened = broadenedSearchTerm(canonicalName);
+      if (broadened) {
+        broadenedTermUsed = broadened.term;
+        const extra = await searchAndBuildCandidates(
+          broadened.term,
+          canonicalName,
+          ingredient.quantity,
+          useSmallestPackageDefault,
+          locationId,
+          appToken,
+          true,
+          broadened.droppedWord,
+        );
+        const seenIds = new Set(scored.map((s) => s.candidate.productId));
+        for (const e of extra) {
+          if (!seenIds.has(e.candidate.productId)) {
+            scored.push(e);
+            seenIds.add(e.candidate.productId);
+          }
+        }
       }
     }
   } catch (err) {
@@ -221,8 +336,20 @@ export async function matchIngredient(
     // human, not a spurious "scores were close" flag.
     const top = scored[0]!;
     if (top.qFit && !top.qFit.covers) {
+      const broadenedNote = broadenedTermUsed
+        ? ` (also tried a broadened search for "${broadenedTermUsed}")`
+        : "";
       requiresApproval = true;
-      approvalReason = `no single available package covers the needed quantity (best available: ${top.qFit.note}) — buying 1 unit will under-shop this ingredient`;
+      approvalReason = `no single available package covers the needed quantity${broadenedNote} (best available: ${top.qFit.note}) — buying 1 unit will under-shop this ingredient`;
+    } else if (top.fromBroadenedSearch) {
+      // Found only via the broadened query, not the ingredient's own name —
+      // per Spec 3 §2.2, a different-named stand-in is a potential material
+      // substitution, which this deterministic ranking can't safely
+      // auto-approve on its own (materiality judgment is Claude-delegated,
+      // [P2]). Surfacing it is still strictly better than the prior
+      // behavior of never finding it at all.
+      requiresApproval = true;
+      approvalReason = `found via a broadened search ("${broadenedTermUsed}") rather than "${canonicalName}" directly — confirm "${top.candidate.name}" is an acceptable substitute before approving`;
     }
   } else if (candidates.length >= 2) {
     const [top, second] = candidates;

@@ -97,6 +97,28 @@ Unchanged from the original design — this logic was always retailer-agnostic:
    at any store search-term variant — Kroger genuinely doesn't carry a large-enough
    package of that specific product at this store, which is correctly a case for human
    judgment (buy 2, or substitute), not a search-semantics bug.
+2a. **One-step broadened fallback search**, only when a core (non-seasoning, quantified)
+   ingredient's specific-name search found no in-stock covering package: drop the last
+   word of the canonical name (e.g. "garlic & herb cream cheese" → "garlic & herb
+   cream") and search again, merging any new results in. Live-verified case: Kroger
+   sells a same-flavor product under a different category name (a "gourmet cheese"/
+   "spreadable cheese" rather than literally "cream cheese") that the exact-name query
+   never surfaces at all. **Requires the dropped word to still appear in the
+   candidate's description** (e.g. "cheese" must appear somewhere) before it's
+   considered — found live that omitting this let a completely wrong product
+   ("Soules Kitchen Creamy Garlic & Herb CHICKEN") score identically to the real
+   cheese alternatives, since "cream" fuzzy-matches "creamy" regardless of whether
+   it's describing a cheese or a meat dish; requiring "cheese" specifically threw out
+   the chicken while keeping the real matches. **Any candidate found only via this
+   broadened search is always `requires_approval`, even if it would otherwise
+   deterministically win the covers-first ranking (§2.2 step 3)** — it wasn't found
+   under the ingredient's own name, so per this spec's existing materiality rule
+   ("different ingredient as stand-in = material... when in doubt → material"), a
+   human should confirm it's an acceptable substitute before it's ever added to a
+   real cart. This is a local, deterministic safety net, not the actual
+   Claude-delegated materiality judgment `[P2]` already scopes — it only ever makes a
+   previously-invisible option visible and flagged, never makes the accept/reject
+   call on its own.
 3. Rank: text/semantic relevance gate → product-form fit (shredded vs block;
    Claude-delegated when text is inconclusive) → quantity-to-package fit (closest-over
    preferred; large mismatch flagged, not excluded if it's the only option) → user

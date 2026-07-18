@@ -58,6 +58,8 @@ function product(overrides: Partial<KrogerProduct> = {}): KrogerProduct {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  (searchProducts as ReturnType<typeof vi.fn>).mockReset();
+  (getAppToken as ReturnType<typeof vi.fn>).mockReset();
   dbRows.recipeId = undefined;
   preparedRun.mockReset();
   preparedGet.mockReset();
@@ -211,6 +213,119 @@ describe("matchIngredient", () => {
     );
     expect(result.requiresApproval).toBe(true);
     expect(result.approvalReason).toMatch(/no single available package covers/);
+  });
+
+  it("falls back to a broadened search when nothing covers the need, but still flags the result for approval", async () => {
+    // Real case: "garlic & herb cream cheese" (250g needed) has no in-stock
+    // package that size under its own name, but a covering-size alternative
+    // turns up under a broadened query ("garlic & herb cream") — it should
+    // now be found and surfaced, but NOT silently auto-approved, since it's
+    // a different-named product (Spec 3 §2.2: materiality is Claude-
+    // delegated, not this deterministic ranking's call to make alone).
+    (searchProducts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        data: [
+          product({
+            productId: "small",
+            upc: "small",
+            description: "Philadelphia Garlic & Herb Cream Cheese",
+            items: [
+              {
+                itemId: "1",
+                fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+                price: { regular: 4.39 },
+                size: "7.5 oz",
+                soldBy: "UNIT",
+              },
+            ],
+          }),
+        ],
+        meta: { pagination: { start: 0, limit: 10, total: 1 } },
+      } satisfies KrogerProductSearchResponse)
+      .mockResolvedValueOnce({
+        data: [
+          product({
+            productId: "alt",
+            upc: "alt",
+            description: "President Rondelé Creamy Whipped Garlic & Herbs Spreadable Cheese",
+            items: [
+              {
+                itemId: "1",
+                fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+                price: { regular: 5.99 },
+                size: "16 oz",
+                soldBy: "UNIT",
+              },
+            ],
+          }),
+        ],
+        meta: { pagination: { start: 0, limit: 10, total: 1 } },
+      } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: {
+          value: "garlic & herb cream cheese",
+          evidence: [{ source_type: "caption" }],
+        },
+        raw_text: "250g garlic & herb cream cheese",
+        quantity: { value: 250, unit: "g", raw_text: "250g" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+
+    expect(searchProducts).toHaveBeenCalledTimes(2);
+    expect(searchProducts).toHaveBeenNthCalledWith(
+      2,
+      "garlic & herb cream",
+      "01100002",
+      "tok",
+      50,
+    );
+    expect(result.candidates[0]!.productId).toBe("alt");
+    expect(result.requiresApproval).toBe(true);
+    expect(result.approvalReason).toMatch(/found via a broadened search/);
+  });
+
+  it("does not attempt a broadened search when the specific-name search already covers the need", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "covers",
+          upc: "covers",
+          description: "Kroger Garlic & Herb Cream Cheese",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 4.99 },
+              size: "16 oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 1 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: {
+          value: "garlic & herb cream cheese",
+          evidence: [{ source_type: "caption" }],
+        },
+        raw_text: "250g garlic & herb cream cheese",
+        quantity: { value: 250, unit: "g", raw_text: "250g" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+
+    expect(searchProducts).toHaveBeenCalledTimes(1);
+    expect(result.requiresApproval).toBe(false);
   });
 
   it("falls back to the text-score + margin check when quantity is stated but unparseable", async () => {
