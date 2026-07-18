@@ -10,7 +10,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# local data (SQLite, temp media, encrypted H-E-B session state)
+# local data (SQLite, temp media, encrypted Kroger OAuth token)
 data/
 spikes/tmp/
 

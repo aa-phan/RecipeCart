@@ -38,6 +38,8 @@ export const config = {
     },
   },
 
+  krogerRedirectUri: process.env.KROGER_REDIRECT_URI ?? "http://localhost:3000/callback",
+
   extraction: {
     // Caption-sufficiency gate (Spec 2 §2.3a, A2-7). Minimum distinct
     // ingredient-pattern lines in the caption before we skip frame
@@ -67,10 +69,18 @@ export const config = {
   },
 
   kroger: {
-    // Kroger Public API base URLs (Spec 3 §2.1).
+    // Kroger Public API base URLs (Spec 3 §2.1) — verified live against the
+    // real API during P1 setup, not copied blind from the docs summary.
     apiBaseUrl: "https://api.kroger.com/v1",
     authorizeUrl: "https://api.kroger.com/v1/connect/oauth2/authorize",
     tokenUrl: "https://api.kroger.com/v1/connect/oauth2/token",
+    // Verified live (2026-07-18): "product.compact" is a valid Client
+    // Credentials scope for Products/Locations; "cart.basic:write" is a
+    // valid Authorization Code scope that reaches Kroger's real login page
+    // (a guessed "profile.compact" scope was rejected with invalid_scope —
+    // don't add scopes here without checking the authorize endpoint first).
+    appScope: "product.compact",
+    userScope: "cart.basic:write",
     // Documented daily rate limits (Spec 3 §2.1) — tracked, not enforced by
     // this config alone; the client should back off well before these.
     productsDailyLimit: 10_000,

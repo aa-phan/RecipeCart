@@ -9,6 +9,12 @@
 //   recipecart approve <recipe-id> -> cart runner, prints itemized results
 import { Command } from "commander";
 import { logger } from "./platform/logger.js";
+import { config } from "./platform/config.js";
+import * as krogerAuth from "./kroger/auth.js";
+import * as krogerClient from "./kroger/client.js";
+import { waitForCallback } from "./kroger/callback_server.js";
+import { saveToken, loadToken, isExpiredOrMissing } from "./kroger/token_store.js";
+import { saveStoreLocation } from "./kroger/store_config.js";
 
 const program = new Command();
 
@@ -23,16 +29,71 @@ program
     "Kroger OAuth2 authorization: opens the consent URL, exchanges the code for a token pair",
   )
   .action(async () => {
-    logger.info("auth command not yet implemented — see src/kroger/client.ts (Step 1d)");
-    process.exitCode = 1;
+    const existing = loadToken();
+    if (!isExpiredOrMissing(existing)) {
+      console.log("Already connected to Kroger (token still valid). Re-authorizing anyway...");
+    }
+
+    const state = krogerAuth.randomState();
+    const url = krogerAuth.buildAuthUrl(state);
+
+    console.log("\nOpen this URL to connect your Kroger account:\n");
+    console.log(`  ${url}\n`);
+    console.log(`Waiting for the redirect to ${config.krogerRedirectUri} ...`);
+
+    try {
+      const { code, state: returnedState } = await waitForCallback();
+      if (returnedState !== state) {
+        logger.error("State mismatch on OAuth callback — possible CSRF, aborting");
+        process.exitCode = 1;
+        return;
+      }
+
+      const token = await krogerAuth.exchangeCode(code);
+      saveToken({
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token ?? "",
+        expiresAt: Date.now() + token.expires_in * 1000,
+      });
+      console.log("Connected to Kroger. Token saved.");
+    } catch (err) {
+      logger.error("Kroger authorization failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      process.exitCode = 1;
+    }
   });
 
 program
   .command("set-store")
+  .argument("<zip-code>", "zip code to search for a nearby Kroger store")
   .description("Look up and save the target Kroger store location")
-  .action(async () => {
-    logger.info("set-store command not yet implemented — see src/kroger/client.ts (Step 1d)");
-    process.exitCode = 1;
+  .action(async (zipCode: string) => {
+    try {
+      const appToken = await krogerAuth.getAppToken();
+      const results = await krogerClient.searchLocations(zipCode, appToken.access_token);
+
+      if (results.data.length === 0) {
+        console.log(`No Kroger stores found near ${zipCode}.`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const store = results.data[0]!;
+      saveStoreLocation({
+        locationId: store.locationId,
+        name: store.name,
+        zipCode: store.address.zipCode,
+      });
+      console.log(
+        `Store set: ${store.name} (${store.address.addressLine1}, ${store.address.city}, ${store.address.state})`,
+      );
+    } catch (err) {
+      logger.error("Store lookup failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      process.exitCode = 1;
+    }
   });
 
 program
