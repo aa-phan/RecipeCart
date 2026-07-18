@@ -27,8 +27,14 @@ export const config = {
     get googleApplicationCredentials() {
       return requireEnv("GOOGLE_APPLICATION_CREDENTIALS");
     },
-    get hebSessionKey() {
-      return requireEnv("HEB_SESSION_KEY");
+    get krogerClientId() {
+      return requireEnv("KROGER_CLIENT_ID");
+    },
+    get krogerClientSecret() {
+      return requireEnv("KROGER_CLIENT_SECRET");
+    },
+    get krogerTokenKey() {
+      return requireEnv("KROGER_TOKEN_KEY");
     },
   },
 
@@ -60,16 +66,23 @@ export const config = {
     jobTimeoutMs: 5 * 60_000,
   },
 
-  heb: {
-    // Pacing (A3-4): jittered delay between actions so automation paces
-    // itself like one careful user, never a hard item cap at this scale.
-    minActionDelayMs: 1500,
-    maxActionDelayMs: 3000,
+  kroger: {
+    // Kroger Public API base URLs (Spec 3 §2.1).
+    apiBaseUrl: "https://api.kroger.com/v1",
+    authorizeUrl: "https://api.kroger.com/v1/connect/oauth2/authorize",
+    tokenUrl: "https://api.kroger.com/v1/connect/oauth2/token",
+    // Documented daily rate limits (Spec 3 §2.1) — tracked, not enforced by
+    // this config alone; the client should back off well before these.
+    productsDailyLimit: 10_000,
+    locationsDailyLimitPerEndpoint: 1_600,
+    cartDailyLimit: 5_000,
+    // Staleness window (A3-6): re-run search if a recipe has sat in
+    // awaiting_review longer than this before a cart run uses its prices.
     searchStalenessWindowMs: 24 * 60 * 60_000,
   },
 
-  get hebSessionStatePath() {
-    return path.join(this.dataDir, "heb-session.enc.json");
+  get krogerTokenStatePath() {
+    return path.join(this.dataDir, "kroger-token.enc.json");
   },
   get sqliteDbPath() {
     return path.join(this.dataDir, "recipecart.db");

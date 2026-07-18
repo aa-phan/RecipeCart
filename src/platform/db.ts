@@ -51,7 +51,7 @@ function migrate(database: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS product_matches (
       id TEXT PRIMARY KEY,
       ingredient_id TEXT NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
-      candidates_json TEXT NOT NULL DEFAULT '[]', -- ranked H-E-B candidates
+      candidates_json TEXT NOT NULL DEFAULT '[]', -- ranked Kroger Products API candidates
       selected_product_id TEXT,
       requires_approval INTEGER NOT NULL DEFAULT 0,
       approval_reason TEXT,

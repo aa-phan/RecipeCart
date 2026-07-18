@@ -2,7 +2,7 @@
   "name": "recipecart",
   "version": "0.1.0",
   "private": true,
-  "description": "TikTok Recipe -> H-E-B Cart Automation (RecipeCart) — Phase 0/1 barebones local pipeline",
+  "description": "TikTok Recipe -> Kroger Cart Automation (RecipeCart) — Phase 0/1 barebones local pipeline",
   "type": "module",
   "bin": {
     "recipecart": "./dist/cli.js"
@@ -11,7 +11,6 @@
     "build": "tsc -p tsconfig.json",
     "cli": "tsx src/cli.ts",
     "spike:tiktok": "tsx spikes/tiktok-media-spike.ts",
-    "spike:heb": "tsx spikes/heb-automation-spike.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run"
@@ -25,7 +24,6 @@
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
     "openai": "^4.104.0",
-    "playwright": "^1.48.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

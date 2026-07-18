@@ -1,51 +1,54 @@
 # RecipeCart — Development Phases
 
-**Product:** RecipeCart — TikTok Recipe → H-E-B Cart Automation (working name)
-**Companion documents:** `specs/spec-1-mobile-capture-review.md` · `specs/spec-2-tiktok-extraction.md` · `specs/spec-3-heb-matching-cart.md` · `specs/spec-4-backend-platform.md` · the four component PRDs
-**Status:** Draft for review — July 16, 2026
+**Product:** RecipeCart — TikTok Recipe → Kroger Cart Automation (working name)
+**Companion documents:** `specs/spec-1-mobile-capture-review.md` · `specs/spec-2-tiktok-extraction.md` · `specs/spec-3-kroger-matching-cart.md` · `specs/spec-4-backend-platform.md` · the four component PRDs · `spike-notes.md` (Phase 0 findings, incl. the H-E-B → Kroger retailer pivot rationale)
+**Status:** Draft for review — July 17, 2026 (retailer pivot from H-E-B to Kroger)
 
 ## Guiding principle
 
-**Prove the pipeline before building the product around it.** The MVP is a barebones, local, CLI-driven pipeline that takes a TikTok URL and ends with items in a real H-E-B cart. Only once that works end-to-end do we layer on the things that make it a product: quality/safety hardening, a backend service, a phone-friendly review UI, the iOS Shortcut, and cloud deployment. This inverts the instinct to build infrastructure first — the two genuinely risky unknowns (TikTok media access via yt-dlp, H-E-B browser automation) sit in the pipeline itself, and nothing else is worth building until they're de-risked.
+**Prove the pipeline before building the product around it.** The MVP is a barebones, local, CLI-driven pipeline that takes a TikTok URL and ends with items in a real Kroger cart. Only once that works end-to-end do we layer on the things that make it a product: quality/safety hardening, a backend service, a phone-friendly review UI, the iOS Shortcut, and cloud deployment. This inverts the instinct to build infrastructure first — the genuinely risky unknown (TikTok media access via yt-dlp) sits in the pipeline itself, and nothing else is worth building until it's de-risked.
+
+**Why Kroger, not H-E-B:** the original design targeted H-E-B via Playwright browser automation. The Phase 0 risk spike found heb.com blocks CDP-driven automation outright (Akamai Bot Manager, confirmed across five configurations including a documented reference implementation's exact working recipe) — a hard block below the JS layer, not something a config change fixes. Kroger publishes an official, self-service Public API (OAuth2, no approval process) covering product search, store lookup, and cart-add — a real, sanctioned integration path with none of that risk. Full investigation: `spike-notes.md`.
 
 Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so it's always clear what is MVP-core versus a later layer.
 
 ---
 
-## Phase 0 — Risk Spikes (gate; days, not weeks)
+## Phase 0 — Risk Spike (gate; days, not weeks)
 
-**Goal:** Answer the two questions that determine whether this product is buildable as designed, before writing any durable code.
+**Goal:** Answer the one remaining question that determines whether this product is buildable as designed, before writing durable pipeline code.
 
-**Scope:** Two throwaway scripts, run locally:
+**Status: substantially complete.** The TikTok media spike and the (now-superseded) H-E-B automation spike both ran; see `spike-notes.md` for full findings, including the retailer-pivot investigation. What remains is lightweight Kroger developer setup, not a risk spike — the Kroger Public API is documented and self-service, so there's no "does this even work" unknown left to de-risk the way there was with H-E-B.
 
-1. **TikTok media spike** (feeds Spec 2 blockers B2-1/B2-2): run yt-dlp against ~5 real public TikTok recipe URLs (including a `vm.tiktok.com` short link and a photo-mode post). Confirm download works, extract audio and frames with FFmpeg, eyeball frame quality at ~1000px long edge.
-2. **H-E-B automation spike** (feeds Spec 3 blockers B3-1 through B3-4): with Playwright in headed mode, manually log in to heb.com, capture storage state, restart the browser with the saved state, confirm the session survives; then search a product, read the cart contents, and add one item. Note the DOM structure/selectors encountered, whether search works logged-out, what fulfillment options (pickup/delivery) look like, and any anti-bot friction.
+**Scope (completed):**
+1. **TikTok media spike** (fed Spec 2 blockers B2-1/B2-2, now resolved): ran yt-dlp against real public TikTok recipe URLs, including a short link and a photo-mode post. B2-1 (standard video download) resolved cleanly. B2-2 (photo-mode) resolved as a confirmed, documented gap — yt-dlp doesn't retrieve slideshow images beyond a single cover thumbnail — already scoped to Phase 2, not a Phase 1 blocker.
+2. **H-E-B automation spike** (superseded): found heb.com blocks Playwright automation outright, across five configurations. This finding is what drove the Kroger pivot — see `spike-notes.md` for the full technical investigation, including reading a public reference implementation's actual source code to rule out a config-based fix.
 
-**Exit criteria:**
-- yt-dlp downloads current public TikToks reliably; frames/audio are usable.
-- H-E-B login-session capture and reuse works; product search, cart read, and cart add are all reachable through stable-enough selectors.
-- Findings written down (a short notes file is fine) and the affected blockers in Specs 2 and 3 marked resolved or escalated.
+**Remaining before Phase 1 (setup, not a spike):**
+- Register a free Kroger developer account and application (self-service — no approval process) to get `client_id`/`client_secret`.
+- Confirm exact OAuth2 scope strings and token TTLs from Kroger's docs (Spec 3 A3-7).
+- Look up the target store's `locationId` via the Locations API.
 
-**Go/no-go:** If either spike fails fundamentally (e.g., H-E-B blocks automated sessions outright), stop and rethink before Phase 1 — the fallback conversations (different retailer, manual-paste extraction input, etc.) are cheaper to have now than after the pipeline is built.
+**Go/no-go:** Already exercised once, for H-E-B — see the guiding principle above. Kroger's Public API is documented and self-service, so there's no comparable "stop and rethink" risk gate remaining for Phase 1. If Kroger's actual API behavior meaningfully diverges from its documentation during Phase 1 setup, that would reopen this gate — but there's no reason to expect that going in.
 
 ---
 
 ## Phase 1 — Barebones Local Pipeline (the MVP core)
 
-**Goal:** One real TikTok recipe becomes items in the real H-E-B cart, end to end, on the developer's machine. No web service, no queue, no auth, no UI.
+**Goal:** One real TikTok recipe becomes items in the real Kroger cart, end to end, on the developer's machine. No web service, no queue, no auth, no UI.
 
 **Scope** (Spec 2 §Pipeline `[P1]` sections, Spec 3 §Matcher/§Cart-runner `[P1]` sections, Spec 4 §Local-first storage `[P1]`):
 - A single CLI (`recipecart <tiktok-url>`) that runs: URL normalize → yt-dlp download (incl. caption) → caption ingredient-list check (Spec 2 §2.3a) → **if the caption suffices, skip straight to audio-only** → otherwise FFmpeg frames → frame dedup → OCR → FFmpeg audio → ASR → one Claude reconciliation call → structured recipe JSON (the Spec 2 canonical schema, even at this stage) saved to disk.
-- Deterministic matcher: normalize ingredients, search H-E-B via the Playwright adapter, rank candidates, write a review file (JSON or rendered terminal table).
+- Deterministic matcher: normalize ingredients, search Kroger's Products API (app-level Client Credentials token, no per-user auth needed), rank candidates, write a review file (JSON or rendered terminal table).
 - Human review happens in the terminal or by editing the review file: the developer unchecks/swaps items by hand.
-- On explicit confirm (`recipecart approve <recipe-id>`), the Playwright cart runner adds approved items and prints itemized results.
-- State in SQLite or flat files under a local data dir; secrets (Claude key, ASR/OCR keys) in a local `.env`; H-E-B storage state in a local encrypted file.
+- On explicit confirm (`recipecart approve <recipe-id>`), the Kroger API client adds approved items via the Cart API (using the user's previously-authorized OAuth token) and prints itemized results.
+- State in SQLite or flat files under a local data dir; secrets (Claude key, ASR/OCR keys, Kroger `client_id`/`client_secret`) in a local `.env`; the user's Kroger OAuth token pair (access + refresh) in a local encrypted file.
 
 **Explicitly deferred:** retries, confidence UX, idempotency keys, pantry logic beyond a hardcoded list, preferences, deletion endpoints — anything not needed to complete one honest end-to-end run.
 
-**Non-negotiable even here:** no checkout code path exists; nothing is added to the cart without the explicit approve step; media temp files deleted after each run; no secrets in git.
+**Non-negotiable even here:** no checkout code path exists (structurally true — Kroger's Public API has no checkout endpoint); nothing is added to the cart without the explicit approve step; media temp files deleted after each run; no secrets in git.
 
-**Exit criteria:** A real TikTok recipe URL → structured recipe with evidence → ranked H-E-B candidates → manual approval → items visible in the real H-E-B cart, with an itemized result printout. Total cost per run within the ~$0.05 Claude budget.
+**Exit criteria:** A real TikTok recipe URL → structured recipe with evidence → ranked Kroger candidates → manual approval → items visible in the real Kroger cart, with an itemized result printout. Total cost per run within the ~$0.05 Claude budget.
 
 ---
 
@@ -54,14 +57,14 @@ Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so 
 **Goal:** Make the pipeline trustworthy, still local and CLI-driven. This is where the PRDs' extraction-quality and cart-safety requirements get fully implemented, while the iteration loop is still fast.
 
 **Scope** (Spec 2 `[P2]` sections, Spec 3 `[P2]` sections):
-- Full confidence/evidence model: per-field confidence bands, evidence references, `null`-with-reason for unevidenced fields, ambiguity flags and conflict rules (on-screen text preferred over narration, both retained).
+- Full confidence/evidence model: per-field confidence bands, evidence references, `null`-with-reason for unevidenced fields, ambiguity flags and conflict rules (on-screen text preferred over narration and caption, all retained).
 - Stated-vs-inferred dietary attribute split enforced at the schema level.
 - Failure classification and retry policy (download failures, model-call failures, schema-validation corrective re-prompt, `not_a_recipe` result type).
-- Vision-escalation scoring with the ≤8-frame cap; photo-mode/slideshow reduced pipeline; music-only handling.
+- Vision-escalation scoring with the ≤8-frame cap; photo-mode/slideshow reduced pipeline (contingent on resolving the yt-dlp image-retrieval gap, B2-2 — see `spike-notes.md`); music-only handling.
 - Matching: safe-vs-material substitution split with Claude-delegated materiality judgment; pantry-staple classification and deprioritization; package-size/unit-conversion table; weighted-item estimates.
-- Cart runner safeguards: read-after-write confirmation, already-in-cart and differing-quantity detection, unexpected-page detection and pause, CAPTCHA/MFA/session-expiry detection → paused state, deliberate pacing.
+- Cart runner safeguards within the Kroger Public API's actual capabilities: idempotency-key-based duplicate prevention (the primary safeguard, since there's no cart-read endpoint at this tier — Spec 3 §17), rate-limit tracking against documented daily ceilings, token-expiry/revocation detection → paused state.
 
-**Exit criteria:** The Spec 2 and Spec 3 acceptance criteria (mirroring PRD C2 §26 and C3 §26) pass against a test set of ~10 varied real TikToks (narration-only, text-only, music-only, non-recipe, photo-mode, conflicting quantities, vague quantities). Extraction edit-worthiness is judged by hand — the developer would accept most recipes with minor edits.
+**Exit criteria:** The Spec 2 and Spec 3 acceptance criteria (mirroring PRD C2 §26 and the Kroger PRD C3 §26) pass against a test set of ~10 varied real TikToks (narration-only, text-only, music-only, non-recipe, photo-mode, conflicting quantities, vague quantities). Extraction edit-worthiness is judged by hand — the developer would accept most recipes with minor edits.
 
 ---
 
@@ -86,11 +89,12 @@ Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so 
 
 **Scope** (Spec 1 `[P4]` sections, Spec 4 `[P4]` sections):
 - iOS Shortcut: share-sheet entry, local TikTok-URL validation, POST with device token, native "Got it — processing" confirmation with a View-progress link.
-- Single Dockerfile (yt-dlp, FFmpeg, Playwright + Chromium, OCR deps) with build caching; two Railway services from the one image; Railway-managed Postgres; worker volume for temp media with TTL sweep.
-- Secrets as Railway env vars; H-E-B session storage-state encrypted with an env-var key; log redaction by field name; `/health` + deploy checks; GitHub auto-deploy on push to main; external uptime ping.
+- Single Dockerfile (yt-dlp, FFmpeg, OCR deps) with build caching — **no Chromium in the image**, a direct simplification from the Kroger pivot (Spec 3 §7): two Railway services from the one image; Railway-managed Postgres; worker volume for temp media with TTL sweep.
+- Secrets as Railway env vars; Kroger OAuth token pair encrypted with an env-var key; log redaction by field name; `/health` + deploy checks; GitHub auto-deploy on push to main; external uptime ping.
+- OAuth2 redirect URI updated to point at the deployed web app's real URL — this is the standard pattern, not a special cloud-hosting story (this resolves what would have been H-E-B action item A3-5; see Spec 3 §2.4).
 - Web app installable to the home screen.
 
-**Exit criteria:** From the phone, with the laptop closed: share a TikTok → confirmation within 2 seconds → later, review and approve in the web app → items in the H-E-B cart. A `git push` redeploys both services; a worker restart mid-job requeues or cleanly fails the job. The Spec 4 deployment checklist is fully checked off.
+**Exit criteria:** From the phone, with the laptop closed: share a TikTok → confirmation within 2 seconds → later, review and approve in the web app → items in the Kroger cart. A `git push` redeploys both services; a worker restart mid-job requeues or cleanly fails the job. The Spec 4 deployment checklist is fully checked off.
 
 ---
 
@@ -101,10 +105,11 @@ Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so 
 **Scope** (Spec 1 `[P5]` sections, remaining items across specs):
 - Preferences screen (store-brand/organic/dietary toggles, pantry always-owned list) wired into ranking.
 - Privacy/Data screen; per-recipe delete and `DELETE /api/account/data` full wipe, verified end-to-end.
-- Reprocess action; duplicate-share "view existing or reprocess" flow; H-E-B connect/reconnect flows polished.
+- Reprocess action; duplicate-share "view existing or reprocess" flow; Kroger connect/reconnect (re-authorize) flows polished.
 - Accessibility pass: Dynamic Type, VoiceOver labels (confidence badges read aloud), 44pt targets, WCAG AA contrast.
 - Operational drills: kill the worker mid-job and confirm recovery; verify Postgres backup restore once and document it; confirm no secrets appear in logs with a real-token probe; TTL sweep verified.
 - Walk all four PRDs' acceptance-criteria lists and record pass/fail.
+- Evaluate whether real usage justifies a Kroger Partner-tier application (removes daily rate limits, adds cart-read access — Spec 3 §25).
 
 **Exit criteria:** All PRD acceptance criteria pass or have a documented, accepted exception. First trusted testers invited.
 
@@ -115,12 +120,12 @@ Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so 
 | Before phase | Must be decided/confirmed (see spec action-item IDs) |
 |---|---|
 | P0 | Nothing — start immediately. |
-| P1 | Runtime language/framework (A4-1 — gates everything); OCR engine (A2-1) and ASR provider (A2-2); Anthropic API key + billing in place; H-E-B account + target store (A3-1). |
+| P1 | Runtime language/framework (A4-1 — gates everything); OCR engine (A2-1) and ASR provider (A2-2); Anthropic API key + billing in place; Kroger developer account + registered app + target store `locationId` (A3-1); exact OAuth2 scopes/TTLs confirmed (A3-7). |
 | P2 | Confidence-band thresholds accepted as speced (A2-4); material-substitution defaults (A3-3). |
 | P3 | Web app framework (A1-1); polling interval (A1-3); Postgres migration approach (A4-2). |
-| P4 | Railway account + plan (A4-3); domain/URL for the web app (A4-4); Shortcut token-provisioning flow (A1-2). |
+| P4 | Railway account + plan (A4-3); domain/URL for the web app (A4-4); Shortcut token-provisioning flow (A1-2); OAuth2 redirect URI updated to the production URL. |
 | P5 | Default pantry-staple list (A1-4); beta tester list and what "invite" means operationally. |
 
 ## Post-MVP roadmap (consolidated from all four PRDs)
 
-Not scheduled — revisit after the beta proves the loop: native iOS app with Share Extension and APNs push; email digest; multi-user/household accounts and multi-tenant H-E-B sessions; unified cross-recipe shopping list; backup-pick pre-approval for out-of-stock items; per-ingredient product memory feeding ranking; manual transcript-paste fallback; multi-video recipe stitching; evidence-image retention (requires object storage); pinned-comment ingestion; repost detection; Haiku 4.5 evaluation for the reconciliation call; Redis/BullMQ queue and bounded worker concurrency; staging environment; secret-rotation automation.
+Not scheduled — revisit after the beta proves the loop: native iOS app with Share Extension and APNs push; email digest; multi-user/household accounts and multi-tenant Kroger tokens; unified cross-recipe shopping list; backup-pick pre-approval for out-of-stock items; per-ingredient product memory feeding ranking; manual transcript-paste fallback; multi-video recipe stitching; evidence-image retention (requires object storage); pinned-comment ingestion; repost detection; Haiku 4.5 evaluation for the reconciliation call; Redis/BullMQ queue and bounded worker concurrency; staging environment; secret-rotation automation; Kroger Partner-tier application (removes rate limits, adds cart-read).

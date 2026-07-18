@@ -1,8 +1,8 @@
 # TikTok Media and Recipe Extraction — Product Requirements Document
 
-**Product:** RecipeCart — TikTok Recipe → H-E-B Cart Automation (working name)
+**Product:** RecipeCart — TikTok Recipe → Kroger Cart Automation (working name)
 **Component:** 2 of 4 — TikTok Media and Recipe Extraction
-**Sibling documents:** Component 1 (Mobile Capture & Review) · Component 3 (H-E-B Product Matching & Cart Automation) · Component 4 (Backend Platform, Hosting & Orchestration)
+**Sibling documents:** Component 1 (Mobile Capture & Review) · Component 3 (Kroger Product Matching & Cart Automation) · Component 4 (Backend Platform, Hosting & Orchestration)
 **Scope:** Single user / small private beta
 **Status:** Draft v1 — July 16, 2026
 

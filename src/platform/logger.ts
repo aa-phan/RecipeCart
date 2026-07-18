@@ -17,7 +17,6 @@ const SENSITIVE_FIELD_PATTERNS = [
   /storage[_-]?state/i,
   /authorization/i,
   /cookie/i,
-  /hebsessionkey/i,
 ];
 
 function isSensitiveKey(key: string): boolean {

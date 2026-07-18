@@ -1,8 +1,8 @@
 # Spec 1 — Mobile Capture & Review Experience
 
-**Source PRD:** `component-1-mobile-capture-review-prd.md` (Draft v1, July 16, 2026)
-**Siblings:** Spec 2 (Extraction) · Spec 3 (Matching & Cart) · Spec 4 (Backend Platform) · `phases.md`
-**Status:** Draft for review — July 16, 2026
+**Source PRD:** `component-1-mobile-capture-review-prd.md` (Draft v2, July 17, 2026)
+**Siblings:** Spec 2 (Extraction) · Spec 3 (Kroger Matching & Cart) · Spec 4 (Backend Platform) · `phases.md`
+**Status:** Draft for review — July 17, 2026 (retailer references updated for the H-E-B → Kroger pivot; see Spec 3)
 **Phase tags:** `[P1 interim]` terminal review stand-in · `[P3]` web review app · `[P4]` iOS Shortcut · `[P5]` polish
 
 ## 1. Overview & Scope
@@ -32,7 +32,7 @@ The P1 CLI review output must include, per ingredient: confidence band + evidenc
   | Cart progress | `Adding to cart` — "Adding 8 of 12…" via poll |
   | Cart result | `Completed`/`Partially completed` — itemized added / skipped / needs-attention with reasons |
   | Failure card | `Failed` — one plain-language card + one recovery action per failure class; never raw errors |
-  | Connect H-E-B | `Requires user intervention` (session) — guided login (Spec 3), resume on success |
+  | Connect Kroger | `Requires user intervention` (token) — OAuth2 authorization (Spec 3), resume on success |
   | Preferences `[P5]` | store-brand/organic/dietary toggles, pantry always-owned list |
   | Privacy/Data `[P5]` | what's stored + why; per-recipe delete; full wipe |
 
@@ -68,7 +68,7 @@ Consumes: Spec 4 REST API (canonical table in Spec 4 §2.5), Spec 2 recipe schem
 ## 6. Blockers
 
 - **B1-1 — Spec 4 API must exist** before P3 UI work; mitigate with contract-first development (the endpoint table is already fixed — a stub server unblocks UI work if schedules ever overlap).
-- **B1-2 — H-E-B connect-flow UX depends on Spec 3's A3-5 decision** (how guided login works once cloud-hosted). The web app's "Connect H-E-B" screen can't be finalized until that lands.
+- ~~B1-2 — connect-flow UX depends on Spec 3's A3-5 decision.~~ **Resolved by the Kroger pivot:** standard OAuth2 authorization-code redirect works identically local or cloud-hosted (Spec 3 §2.4) — no special guided-login UX problem remains. The web app's "Connect Kroger" screen is a standard OAuth consent redirect + callback, not a bespoke flow.
 - **B1-3 — iOS Shortcut capability check `[P4]`:** confirm Shortcuts can do the POST + stored-token + result-alert flow as designed (high confidence it can; verify early in P4 with a 30-minute prototype).
 
 ## 7. Considerations

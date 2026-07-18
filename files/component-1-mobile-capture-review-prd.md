@@ -1,23 +1,23 @@
 # Mobile Capture and Review Experience — Product Requirements Document
 
-**Product:** RecipeCart — TikTok Recipe → H-E-B Cart Automation (working name, rename freely)
+**Product:** RecipeCart — TikTok Recipe → Kroger Cart Automation (working name, rename freely)
 **Component:** 1 of 4 — Mobile Capture and Review Experience
-**Sibling documents:** Component 2 (TikTok Media & Recipe Extraction) · Component 3 (H-E-B Product Matching & Cart Automation) · Component 4 (Backend Platform, Hosting & Orchestration)
+**Sibling documents:** Component 2 (TikTok Media & Recipe Extraction) · Component 3 (Kroger Product Matching & Cart Automation) · Component 4 (Backend Platform, Hosting & Orchestration)
 **Scope:** Single user / small private beta (a handful of trusted testers)
-**Status:** Draft v1 — July 16, 2026
+**Status:** Draft v2 — July 17, 2026 (retailer references updated for the H-E-B → Kroger pivot; see Component 3)
 
 ### Shared assumptions this document relies on
 These are decided once and held constant across all four PRDs so the pieces click together. Full rationale lives in Component 4.
 - **No account system for v1.** A single device-bound access token identifies "the household." No email/password, no OAuth.
 - **Status is pulled, not pushed, for MVP.** The web app polls the backend; push notifications arrive post-MVP with the native app.
-- **Matching happens automatically, before the user asks for it.** As soon as extraction finishes, product candidates are computed in the background so the review screen never opens empty. Nothing is written to the real H-E-B cart until the user explicitly approves.
+- **Matching happens automatically, before the user asks for it.** As soon as extraction finishes, product candidates are computed in the background so the review screen never opens empty. Nothing is written to the real Kroger cart until the user explicitly approves.
 - **One review screen, one approval action.** Ingredients and proposed products are reviewed together, with a single "Add to cart" action at the end — not two sequential confirm steps.
 - **Checkout is never automated**, in this component or any other.
 
 ---
 
 ## 1. Executive Summary
-This component is the only part of the system the user directly touches. Everything else — media processing, extraction, product matching, cart automation — exists to make this experience possible: share a TikTok link, get a reviewed and editable grocery list, approve it, done. The bar for success is that using this app feels obviously faster than pausing a video to type ingredients into the H-E-B search bar by hand.
+This component is the only part of the system the user directly touches. Everything else — media processing, extraction, product matching, cart automation — exists to make this experience possible: share a TikTok link, get a reviewed and editable grocery list, approve it, done. The bar for success is that using this app feels obviously faster than pausing a video to type ingredients into the Kroger search bar by hand.
 
 ## 2. Problem Statement
 Turning a TikTok recipe into groceries today means re-watching the video, manually transcribing ingredients and quantities (often narrated quickly or shown only as fast on-screen text), and then searching for each item one at a time in a grocery app — deciding on brand, size, and substitutions along the way. This is tedious enough that many recipes are saved and never cooked. The mobile component's job is to compress that entire manual workflow into: share → review → approve.
@@ -33,7 +33,7 @@ Turning a TikTok recipe into groceries today means re-watching the video, manual
 - This component does not perform extraction, matching, or cart automation itself — it triggers and displays the results of Components 2–4.
 - No support for non-TikTok sources in v1 (Instagram Reels, YouTube Shorts, etc.).
 - No multi-user household accounts in v1 — single device/household identity only.
-- No in-app checkout or payment — the H-E-B app/site owns checkout entirely.
+- No in-app checkout or payment — the Kroger app/site owns checkout entirely.
 - No recipe editing beyond ingredients (i.e., no rewriting cooking instructions/steps in v1; the product is about the grocery list, not a recipe-box app).
 
 ## 5. Target User
@@ -46,10 +46,10 @@ The private beta user is a mobile-first, iOS-based home cook who already saves T
 4. User can close TikTok and continue their day. The job processes in the background (Components 2 and 3).
 5. User opens the web app whenever convenient — from the confirmation link, from a home-screen icon, or by returning later. The **Recipes** list shows the job as "Processing" with a lightweight status line ("Extracting ingredients…").
 6. Once extraction and matching both complete, the card updates to "Ready to review."
-7. User opens it into the **Review screen**: recipe title/source at top, editable ingredient list (with confidence and evidence) in the middle, proposed H-E-B products at the bottom, each already pre-selected where confidence is high.
+7. User opens it into the **Review screen**: recipe title/source at top, editable ingredient list (with confidence and evidence) in the middle, proposed Kroger products at the bottom, each already pre-selected where confidence is high.
 8. User edits ingredients as needed (remove, adjust quantity, mark "I already have this"), swaps or rejects any proposed product they disagree with, then taps **Add N items to cart**.
 9. Backend runs the cart-add job; the screen shows live-ish progress via polling ("Adding 8 of 12…").
-10. Result screen reports a clean itemized outcome — added, skipped, needs attention — with a button to **Open H-E-B** to review the cart and check out there.
+10. Result screen reports a clean itemized outcome — added, skipped, needs attention — with a button to **Open Kroger** to review the cart and check out there.
 
 ## 7. Secondary and Failure-State Journeys
 | Scenario | Behavior |
@@ -58,10 +58,10 @@ The private beta user is a mobile-first, iOS-based home cook who already saves T
 | Same TikTok URL shared twice | Backend detects the duplicate source URL and the app offers "View existing recipe" or "Reprocess" instead of silently creating a second job. |
 | Video is private, deleted, age-restricted, or region-locked | Job fails at the download stage (owned by Component 2). Review screen is replaced with a plain-language failure card and a "Try a different link" action. |
 | Extraction succeeds but overall confidence is low (e.g., music-only video, little on-screen text) | Review screen still renders with a persistent low-confidence banner encouraging the user to double check quantities before approving. |
-| User has no H-E-B session connected yet when they reach "Add to cart" | Flow pauses with a "Connect your H-E-B account" prompt (guided login handled by Component 3/4), then resumes automatically once connected. |
-| H-E-B session expires mid-cart-job | Job pauses in "Needs your attention" state; push/poll surfaces a "Please reconnect H-E-B" card; resuming re-attempts only the remaining items. |
+| User has no Kroger account connected yet when they reach "Add to cart" | Flow pauses with a "Connect your Kroger account" prompt (Kroger OAuth sign-in handled by Component 3/4), then resumes automatically once connected. |
+| Kroger access token expires mid-cart-job | Job pauses in "Needs your attention" state; push/poll surfaces a "Please reconnect Kroger" card; resuming re-attempts only the remaining items. |
 | Cart job partially succeeds | Result screen always itemizes success/skip/attention — "partial success" is a normal outcome, not an error state. |
-| TikTok or H-E-B automation is fully unavailable | Recipe stays saved in "Extracted" or "Matched" state indefinitely; user can retry later without re-sharing from TikTok. |
+| TikTok or Kroger API access is fully unavailable | Recipe stays saved in "Extracted" or "Matched" state indefinitely; user can retry later without re-sharing from TikTok. |
 
 ## 8. Functional Requirements
 - Accept a TikTok URL via iOS Shortcut (MVP) and, later, a native Share Extension.
@@ -123,13 +123,13 @@ Each row is tappable into the matching state below. Pull-to-refresh forces a pol
 │           amount” · tap to fix   │
 │                    [+ Add item]  │
 ├─── PROPOSED PRODUCTS ────────────┤
-│ ☑ H-E-B Chicken Thighs, 1.4lb    │
+│ ☑ Kroger Chicken Thighs, 1.4lb    │
 │    $6.49 · $4.64/lb              │
 │    [swap ▾]                      │
-│ ☑ H-E-B Bakery Flour Tortillas   │
+│ ☑ Kroger Bakery Flour Tortillas   │
 │    (8ct) — $2.79      [swap ▾]  │
 │ ☐ Cumin — skipped (pantry)       │
-│ ☑ H-E-B Sour Cream, 8oz — $1.89  │
+│ ☑ Kroger Sour Cream, 8oz — $1.89  │
 │    ⚠ amount unclear — confirm    │
 ├───────────────────────────────────┤
 │      [ Add 3 items to cart ]     │
@@ -150,7 +150,7 @@ Each row is tappable into the matching state below. Pull-to-refresh forces a pol
 │   • Sour Cream — out of stock    │
 │     [ choose alternate ]         │
 ├─────────────────────────────────┤
-│ [ Open H-E-B to finish shopping ]│
+│ [ Open Kroger to finish shopping ]│
 └─────────────────────────────────┘
 ```
 
@@ -174,7 +174,7 @@ Each row is tappable into the matching state below. Pull-to-refresh forces a pol
 - Single device-bound bearer token, generated on first web-app visit or first Shortcut run, stored as a secure HTTP-only cookie (web) and embedded in the Shortcut's stored text (client).
 - Token maps to a `user_id` in the backend from day one (see Component 4) even though v1 has exactly one row — this avoids an auth rewrite if multi-user support is added later.
 - Settings screen supports "Log out this device" (revokes the token) as the only session-management action needed for v1.
-- The token authenticates *this app's* API only. It has no relationship to the user's H-E-B credentials, which Component 3/4 manage separately and never expose to this layer.
+- The token authenticates *this app's* API only. It has no relationship to the user's Kroger credentials, which Component 3/4 manage separately and never expose to this layer.
 
 ## 13. Accessibility Requirements
 - Full Dynamic Type support; layouts must not clip or truncate at larger text sizes.
@@ -186,9 +186,9 @@ Each row is tappable into the matching state below. Pull-to-refresh forces a pol
 ## 14. Privacy Requirements
 - The app stores: shared URLs, extracted recipe/ingredient data, product match decisions, cart results, and user preferences.
 - The app does **not** retain raw video, audio, or extracted frames beyond the processing window (owned by Components 2/4; this component simply must not assume persistent media exists to display).
-- A visible, plain-language explanation of what leaves the device and why (shown once, and always available from Settings) — TikTok URL and derived text go to the backend and to Claude for extraction; nothing is sent to H-E-B until cart-add time, and only the specific approved product list is sent then.
+- A visible, plain-language explanation of what leaves the device and why (shown once, and always available from Settings) — TikTok URL and derived text go to the backend and to Claude for extraction; nothing is sent to Kroger until cart-add time, and only the specific approved product list is sent then.
 - Per-recipe delete and full-account "delete everything" are both one tap plus a confirmation, and take effect immediately.
-- H-E-B session data is never surfaced to or stored by this component (owned by Component 3/4).
+- Kroger token data is never surfaced to or stored by this component (owned by Component 3/4).
 
 ## 15. Analytics and Success Metrics
 | Metric | Why it matters |
@@ -202,7 +202,7 @@ Each row is tappable into the matching state below. Pull-to-refresh forces a pol
 | Recipes abandoned before approval | Signals confusing review UX or low trust in the extraction. |
 
 ## 16. Error and Recovery Behavior
-Every terminal or paused state maps to exactly one plain-language card and one primary recovery action. No raw error strings, stack traces, or backend status codes are ever shown to the user. Categories: video inaccessible (retry with different link), extraction failed (retry / reprocess), matching degraded (proceed with fewer/no product suggestions rather than blocking review), H-E-B not connected (connect flow), H-E-B session expired (reconnect flow), cart partially failed (itemized, not blocking), automation fully down (recipe stays saved, retry later).
+Every terminal or paused state maps to exactly one plain-language card and one primary recovery action. No raw error strings, stack traces, or backend status codes are ever shown to the user. Categories: video inaccessible (retry with different link), extraction failed (retry / reprocess), matching degraded (proceed with fewer/no product suggestions rather than blocking review), Kroger not connected (connect flow), Kroger access expired (reconnect flow), cart partially failed (itemized, not blocking), automation fully down (recipe stays saved, retry later).
 
 ## 17. Dependencies on the Other Three Components
 - **From Component 2:** structured recipe JSON (ingredients, quantities, confidence, evidence references) and a distinct "not a recipe" result type so this UI can show a friendly message instead of a garbled ingredient list.
@@ -223,7 +223,7 @@ Every terminal or paused state maps to exactly one plain-language card and one p
 | `/api/recipes/:id/reprocess` | POST | Re-run extraction on the existing source URL |
 | `/api/recipes/:id` | DELETE | Delete recipe and associated data |
 | `/api/preferences` | GET/PATCH | Store-brand, organic, dietary, pantry defaults |
-| `/api/heb/session` | POST/GET | Start guided H-E-B login; check connection status |
+| `/api/kroger/auth` | POST/GET | Start Kroger OAuth2 authorization; check connection status |
 | `/api/account/data` | DELETE | Full data wipe |
 
 All mutating endpoints that a flaky mobile connection might retry (`cart:approve` especially) require an idempotency key so a duplicate network retry never double-triggers cart automation.
@@ -239,7 +239,7 @@ Native iOS app with Share Extension; push notifications; email digest; multi-use
 - Sharing an invalid (non-TikTok) URL is rejected locally with no backend call.
 - Re-sharing an already-submitted URL surfaces "existing recipe" rather than creating a duplicate job.
 - Every ingredient shown in Review carries a confidence indicator and is editable.
-- No product is added to the H-E-B cart without the item being visible and approved (implicitly via pre-selection or explicitly) in the Review screen first.
+- No product is added to the Kroger cart without the item being visible and approved (implicitly via pre-selection or explicitly) in the Review screen first.
 - A partial cart-add result always lists every unadded item with a reason.
 - Deleting a recipe removes it from the list and from the backend within one request/response cycle.
 - All primary flows are operable via VoiceOver and at the largest Dynamic Type setting.
