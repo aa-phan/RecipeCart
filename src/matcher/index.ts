@@ -61,6 +61,7 @@ function compareBySmallestPackage(a: ProductCandidate, b: ProductCandidate): num
 interface ScoredCandidate {
   candidate: ProductCandidate;
   qFit: QuantityFit | null;
+  textScore: number;
   // True when this candidate only turned up via the broadened fallback
   // search (below), not the ingredient's own specific-name search — always
   // flagged for approval regardless of quantity fit, since dropping a
@@ -161,8 +162,10 @@ async function searchAndBuildCandidates(
           unitPrice,
           rankScore,
           reason: qFit?.note,
+          quantityToOrder: qFit?.unitsNeeded ?? 1,
         },
         qFit,
+        textScore,
         fromBroadenedSearch,
       });
     }
@@ -179,15 +182,44 @@ function coverageBucket(qFit: QuantityFit | null): 0 | 1 | 2 {
   return qFit.covers ? 0 : 1;
 }
 
-/** "Convert to the package's unit, then pick the smallest size that fully
- * covers the needed quantity" (Spec 3 §2.2 step 3): bucket by coverage
- * first (a covering package always wins over an undersized one, however
- * small the surplus), then within a bucket prefer the closest fit (smallest
- * surplus if covering, largest available if undersized — both are
- * `qFit.score` descending), then cheapest price as the final tiebreak. */
+// A text-relevance gap at least this large is treated as "clearly a better
+// name match" and wins outright, before quantity fit even gets a vote.
+// Found necessary via live data: without this, "Heritage Farm® Boneless
+// Skinless Chicken Breasts" (textScore 1.3 — the ingredient's full name
+// literally appears in the description) lost to "Kroger® Shaved Chicken"
+// (textScore 0.5 — only "chicken" overlaps, "breast" doesn't) purely
+// because 3x the shaved-chicken package landed a couple percentage points
+// closer to the exact needed quantity than 2x the real chicken breast.
+// 0.2 is comfortably below a genuine full-name match's score (~1.0-1.3) and
+// comfortably above the noise floor of a single-token partial overlap
+// (~0.3-0.5) — a tunable heuristic, not a validated constant.
+const RELEVANCE_GAP_THRESHOLD = 0.2;
+
+/** "Convert to the package's unit, then pick the smallest size (or number
+ * of packages) that fully covers the needed quantity" (Spec 3 §2.2 step 3).
+ * Bucket by coverage FIRST — a purchase that actually covers the need
+ * always wins over one that doesn't, however tight the numeric fit of the
+ * non-covering option looks, because a candidate that can't be reasonably
+ * purchased to meet the need isn't a real option at all. WITHIN a coverage
+ * bucket, text relevance decides next: a candidate whose name clearly
+ * matches the ingredient better wins over one that's merely a numerically
+ * tighter package-count fit (see RELEVANCE_GAP_THRESHOLD's doc — without
+ * this, "Kroger® Shaved Chicken" beat real "chicken breast" purely because
+ * 3 of its packages landed a couple percentage points closer to the target
+ * than 2 packages of the real thing). Only when relevance is roughly tied
+ * does `qFit.score` (closest surplus) and then price decide. Known
+ * remaining gap: this can't distinguish "raw potatoes" from "seasoned
+ * frozen roasted potatoes" when both literally contain the word
+ * "potatoes" — textRelevanceScore has no sense of preparation state, only
+ * token overlap, so a single-word ingredient name with no other
+ * distinguishing tokens can still tie on relevance between a raw and a
+ * prepared product, falling through to fit/price same as before. */
 function compareByQuantityCoverage(a: ScoredCandidate, b: ScoredCandidate): number {
   const bucketDiff = coverageBucket(a.qFit) - coverageBucket(b.qFit);
   if (bucketDiff !== 0) return bucketDiff;
+
+  const relevanceDiff = b.textScore - a.textScore;
+  if (Math.abs(relevanceDiff) >= RELEVANCE_GAP_THRESHOLD) return relevanceDiff;
 
   if (a.qFit && b.qFit) {
     const scoreDiff = b.qFit.score - a.qFit.score;
@@ -327,12 +359,13 @@ export async function matchIngredient(
       ? "small seasoning amount — smallest package selected regardless of stated quantity"
       : "no quantity stated — smallest package selected";
   } else if (useQuantityCoverage) {
-    // "Convert to the package's unit, then pick the smallest size that
-    // fully covers the needed quantity" (Spec 3 §2.2 step 3) — deterministic
-    // by construction once a real coverage signal exists, EXCEPT when no
-    // candidate actually covers the need: buying 1 unit of an undersized
-    // package would silently under-shop the recipe (cli.ts's `approve` adds
-    // exactly 1 package per ingredient in P1), so that genuinely needs a
+    // "Convert to the package's unit, then pick the smallest size (or
+    // smallest number of packages) that fully covers the needed quantity"
+    // (Spec 3 §2.2 step 3) — deterministic by construction once a real
+    // coverage signal exists, including buying multiple of a smaller
+    // package (rank.ts's MAX_AUTO_MULTI_UNIT_PURCHASE caps how far that
+    // auto-resolves; past that, or when even the largest available package
+    // times that cap still can't reach the need, it genuinely needs a
     // human, not a spurious "scores were close" flag.
     const top = scored[0]!;
     if (top.qFit && !top.qFit.covers) {
@@ -340,7 +373,7 @@ export async function matchIngredient(
         ? ` (also tried a broadened search for "${broadenedTermUsed}")`
         : "";
       requiresApproval = true;
-      approvalReason = `no single available package covers the needed quantity${broadenedNote} (best available: ${top.qFit.note}) — buying 1 unit will under-shop this ingredient`;
+      approvalReason = `no reasonable purchase covers the needed quantity${broadenedNote} (best available: ${top.qFit.note})`;
     } else if (top.fromBroadenedSearch) {
       // Found only via the broadened query, not the ingredient's own name —
       // per Spec 3 §2.2, a different-named stand-in is a potential material

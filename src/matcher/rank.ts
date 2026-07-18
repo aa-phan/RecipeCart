@@ -63,16 +63,33 @@ export function textRelevanceScore(ingredientName: string, description: string):
   return score;
 }
 
+// Buying more than this many of the same package to cover one ingredient's
+// need is no longer treated as an auto-resolvable "just buy more" case —
+// past this point it's flagged for approval instead (still reported, with
+// the units-needed math shown, never silently dropped). A judgment call,
+// not a validated number: guards against the matcher quietly turning a
+// dubious match (or a genuinely huge recipe quantity) into an oddly large
+// cart line, which is worth a human glance before it's real money.
+const MAX_AUTO_MULTI_UNIT_PURCHASE = 3;
+
 export interface QuantityFit {
   score: number; // higher is better WITHIN a `covers` bucket only — see below
-  // Whether this package's size fully covers the needed quantity. `score`
-  // alone is NOT a reliable covers-vs-undersized signal: a wildly-oversized
-  // covering package (e.g. 20x the need) scores low (1/20), which can be
-  // numerically lower than a nearly-full undersized package (e.g. 90% of
-  // need scores 0.45) — callers that need "fully covers always beats
-  // undersized, regardless of surplus" must bucket on `covers` first and
-  // only compare `score` within a bucket.
+  // Whether buying `unitsNeeded` of this package fully covers the needed
+  // quantity AND `unitsNeeded` is within MAX_AUTO_MULTI_UNIT_PURCHASE.
+  // `score` alone is NOT a reliable covers-vs-undersized signal: a
+  // wildly-oversized covering package (e.g. 20x the need) scores low
+  // (1/20), which can be numerically lower than a barely-short package
+  // (e.g. 90% of need scores 0.45) — callers that need "fully covers always
+  // beats not covering" must bucket on `covers` first and only compare
+  // `score` within a bucket.
   covers: boolean;
+  // How many of this package to buy to reach (or just exceed) the needed
+  // quantity — 1 when a single package already covers it. Spec 3 §2.2 step
+  // 3's "closest-over" rule, generalized: buying multiple of a smaller
+  // package is a normal, expected outcome (a recipe needing 800g of chicken
+  // breast from 1lb packages just means buying 2), not a failure to find a
+  // match.
+  unitsNeeded: number;
   note: string;
 }
 
@@ -138,24 +155,35 @@ export function quantityFitScore(
   }
 
   if (neededBase <= 0) return null;
-  const ratio = parsedSize.baseQuantity / neededBase;
+  const singlePackageRatio = parsedSize.baseQuantity / neededBase;
+  // "Closest-over" generalized across N units: a single package might not
+  // cover the need on its own, but buying `unitsNeeded` of it (ceil of the
+  // ratio, minimum 1) usually does — a recipe needing 800g from 1lb
+  // packages just means buying 2, not a failure to find a match. The score
+  // formula is identical to before when unitsNeeded is 1 (single-package
+  // case unchanged); it now also naturally ranks "fewer units, less total
+  // surplus" combinations higher across the multi-unit case.
+  const unitsNeeded = Math.max(1, Math.ceil(neededBase / parsedSize.baseQuantity));
+  const totalRatio = (parsedSize.baseQuantity * unitsNeeded) / neededBase;
+  const withinAutoLimit = unitsNeeded <= MAX_AUTO_MULTI_UNIT_PURCHASE;
 
-  if (ratio >= 1) {
-    // Smallest package that still covers the need scores highest; score
-    // decays toward 0 as the surplus grows, but never excludes.
-    return {
-      score: 1 / ratio,
-      covers: true,
-      note: `covers needed quantity (${(ratio * 100).toFixed(0)}% of need)`,
-    };
+  const note =
+    unitsNeeded === 1
+      ? `covers needed quantity (${(totalRatio * 100).toFixed(0)}% of need)`
+      : `${unitsNeeded} x this package covers the needed quantity (${(totalRatio * 100).toFixed(0)}% of need)`;
+
+  if (withinAutoLimit) {
+    return { score: 1 / totalRatio, covers: true, unitsNeeded, note };
   }
-  // Undersized package: not excluded (per spec, flagged not excluded when
-  // it's the best/only option), but never ranked above a covering package —
-  // see the `covers` field doc above.
+  // More units than MAX_AUTO_MULTI_UNIT_PURCHASE would technically cover it
+  // too, but that's no longer an auto-resolvable "just buy more" case —
+  // report it (so a human reviewing sees the real math), but don't let it
+  // rank as `covers`.
   return {
-    score: ratio * 0.5,
+    score: singlePackageRatio * 0.5,
     covers: false,
-    note: `package smaller than needed quantity (${(ratio * 100).toFixed(0)}% of need)`,
+    unitsNeeded,
+    note: `would need ${unitsNeeded} of this package to cover the needed quantity (${(totalRatio * 100).toFixed(0)}% of need) — likely a wrong-size match`,
   };
 }
 

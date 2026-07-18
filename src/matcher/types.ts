@@ -12,6 +12,12 @@ export interface ProductCandidate {
   unitPrice?: number; // price per base unit (gram/ml/count) when size was parseable
   rankScore: number; // deterministic P1 score — see rank.ts
   reason?: string; // short human-readable note on quantity fit, when available
+  // How many of this package to buy to cover the ingredient's needed
+  // quantity (Spec 3 §2.2 step 3, "closest-over" generalized across N
+  // units — rank.ts's QuantityFit.unitsNeeded). Defaults to 1 (single
+  // package, or no quantity signal at all — seasonings/no-stated-quantity
+  // ingredients always buy exactly 1).
+  quantityToOrder: number;
 }
 
 export interface IngredientMatch {

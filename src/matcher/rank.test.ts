@@ -39,9 +39,24 @@ describe("quantityFitScore", () => {
     expect(small!.score).toBeGreaterThan(big!.score);
   });
 
-  it("still scores (lower) an undersized package rather than excluding it", () => {
+  it("covers via buying multiple of a smaller package, within the auto-purchase cap", () => {
+    // 2 lb needed from 1 lb packages: buying 2 exactly covers it — this is
+    // the normal, expected "closest-over" outcome, not a failure to match.
     const fit = quantityFitScore({ value: 2, unit: "lb", raw_text: "2 lb" }, "1 lb");
     expect(fit).not.toBeNull();
+    expect(fit!.covers).toBe(true);
+    expect(fit!.unitsNeeded).toBe(2);
+    expect(fit!.score).toBeCloseTo(1, 5);
+  });
+
+  it("still scores (lower) rather than excluding when even multiple packages can't reasonably cover it", () => {
+    // 10 lb needed from 1 lb packages: 10 units exceeds
+    // MAX_AUTO_MULTI_UNIT_PURCHASE, so this is no longer auto-resolved —
+    // reported (with the real unit count), not excluded.
+    const fit = quantityFitScore({ value: 10, unit: "lb", raw_text: "10 lb" }, "1 lb");
+    expect(fit).not.toBeNull();
+    expect(fit!.covers).toBe(false);
+    expect(fit!.unitsNeeded).toBe(10);
     expect(fit!.score).toBeLessThan(0.5);
   });
 

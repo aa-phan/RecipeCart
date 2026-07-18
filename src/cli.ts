@@ -117,8 +117,11 @@ interface ProductMatchRow {
  * candidate as approved, and skips anything the matcher flagged
  * requires_approval — those genuinely need human disambiguation before this
  * command can honestly call them approved, so they're reported, not guessed.
- * Quantity is fixed at 1 package per ingredient for P1 — the full
- * purchase-quantity math (Spec 3 §10) isn't wired end-to-end yet. */
+ * Quantity comes from the matcher's own purchase-quantity math
+ * (`candidate.quantityToOrder` — Spec 3 §2.2 step 3, "closest-over"
+ * generalized across multiple packages when one alone doesn't cover the
+ * ingredient's needed amount), defaulting to 1 for older persisted matches
+ * that predate the field. */
 function selectApprovedItems(recipeId: string): {
   approved: ApprovedCartItem[];
   skipped: { name: string; reason: string }[];
@@ -148,7 +151,11 @@ function selectApprovedItems(recipeId: string): {
       skipped.push({ name, reason: "no candidates found" });
       continue;
     }
-    approved.push({ upc: top.upc, quantity: 1, ingredientId: row.ingredient_id });
+    approved.push({
+      upc: top.upc,
+      quantity: top.quantityToOrder ?? 1,
+      ingredientId: row.ingredient_id,
+    });
   }
 
   return { approved, skipped };

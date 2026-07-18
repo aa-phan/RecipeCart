@@ -176,11 +176,10 @@ describe("matchIngredient", () => {
     expect(result.candidates[0]!.productId).toBe("a");
   });
 
-  it("requires approval when no available package covers the needed quantity", async () => {
-    // Needs 800g of chicken breast; only undersized packages are available
-    // (a real case from live data) — buying 1 unit would silently
-    // under-shop the recipe, so this must surface for review rather than
-    // silently picking the "closest" undersized option.
+  it("auto-resolves by buying multiple packages when one alone doesn't cover the need", async () => {
+    // Needs 800g of chicken breast; only 1 lb (453.6g) packages are
+    // available — buying 2 covers it (906g, 113% of need), which is the
+    // normal "closest-over" outcome, not something that needs a human.
     (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: [
         product({
@@ -211,17 +210,113 @@ describe("matchIngredient", () => {
       "01100002",
       "tok",
     );
-    expect(result.requiresApproval).toBe(true);
-    expect(result.approvalReason).toMatch(/no single available package covers/);
+    expect(result.requiresApproval).toBe(false);
+    expect(result.candidates[0]!.quantityToOrder).toBe(2);
   });
 
-  it("falls back to a broadened search when nothing covers the need, but still flags the result for approval", async () => {
-    // Real case: "garlic & herb cream cheese" (250g needed) has no in-stock
-    // package that size under its own name, but a covering-size alternative
-    // turns up under a broadened query ("garlic & herb cream") — it should
-    // now be found and surfaced, but NOT silently auto-approved, since it's
-    // a different-named product (Spec 3 §2.2: materiality is Claude-
-    // delegated, not this deterministic ranking's call to make alone).
+  it("prefers a better name match over a numerically tighter multi-package fit", async () => {
+    // Real regression found via live data: "Kroger Shaved Chicken" (10oz,
+    // deli-style — "breast" doesn't appear anywhere in its name) needs 3
+    // units to reach 106% of the 800g need; real "Chicken Breast" (1lb)
+    // needs 2 units to reach 113%. Ranking on fit-tightness alone picked
+    // the deli product purely because 106% is numerically closer to 100%
+    // than 113% — text relevance must win this, since "chicken breast" is
+    // an unambiguously better name match than "shaved chicken."
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "shaved",
+          upc: "shaved",
+          description: "Kroger Shaved Chicken",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 4.99 },
+              size: "10 oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+        product({
+          productId: "real",
+          upc: "real",
+          description: "Heritage Farm Boneless Skinless Chicken Breasts",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 2.69 },
+              size: "1 lb",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: { value: "chicken breast", evidence: [{ source_type: "caption" }] },
+        raw_text: "800g chicken breast",
+        quantity: { value: 800, unit: "g", raw_text: "800g" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+    expect(result.requiresApproval).toBe(false);
+    expect(result.candidates[0]!.productId).toBe("real");
+  });
+
+  it("requires approval when no reasonable purchase (even multiple packages) covers the needed quantity", async () => {
+    // Needs 5000g of chicken breast from only 1 lb packages — 12+ units
+    // exceeds the auto-purchase cap, so this genuinely needs a human rather
+    // than silently generating an oddly large cart line.
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "a",
+          upc: "a",
+          description: "Kroger Chicken Breast",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 5.0 },
+              size: "1 lb",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 1 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(
+      ingredient({
+        canonical_name_en: { value: "chicken breast", evidence: [{ source_type: "caption" }] },
+        raw_text: "5000g chicken breast",
+        quantity: { value: 5000, unit: "g", raw_text: "5000g" },
+      }),
+      "ing-1",
+      "01100002",
+      "tok",
+    );
+    expect(result.requiresApproval).toBe(true);
+    expect(result.approvalReason).toMatch(/no reasonable purchase covers/);
+  });
+
+  it("falls back to a broadened search when even multi-buy can't cover the need, but still flags the result for approval", async () => {
+    // Real case: "garlic & herb cream cheese" (1000g needed — enough that
+    // even buying multiple 7.5oz packages exceeds the auto-purchase cap)
+    // has no in-stock package under its own name that reasonably covers it,
+    // but a larger, covering-size alternative turns up under a broadened
+    // query ("garlic & herb cream") — it should now be found and surfaced,
+    // but NOT silently auto-approved, since it's a different-named product
+    // (Spec 3 §2.2: materiality is Claude-delegated, not this deterministic
+    // ranking's call to make alone).
     (searchProducts as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         data: [
@@ -268,8 +363,8 @@ describe("matchIngredient", () => {
           value: "garlic & herb cream cheese",
           evidence: [{ source_type: "caption" }],
         },
-        raw_text: "250g garlic & herb cream cheese",
-        quantity: { value: 250, unit: "g", raw_text: "250g" },
+        raw_text: "1000g garlic & herb cream cheese",
+        quantity: { value: 1000, unit: "g", raw_text: "1000g" },
       }),
       "ing-1",
       "01100002",
@@ -533,6 +628,7 @@ describe("renderMatchesTable", () => {
             price: 3.49,
             size: "16 fl oz",
             rankScore: 10,
+            quantityToOrder: 1,
           },
         ],
         requiresApproval: false,

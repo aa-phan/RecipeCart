@@ -135,15 +135,42 @@ Unchanged from the original design — this logic was always retailer-agnostic:
    still routinely swallowed a real, correctly-computed quantity-fit signal: e.g.
    two same-size, different-price bottles of olive oil both "covering" the need
    scored identically on the blended metric and stayed stuck at
-   `requires_approval` even though price alone cleanly picks a winner. The one
-   case that still (correctly) requires approval: **no candidate covers the
-   needed quantity at all** — since the P1 cart runner only ever adds 1 unit per
-   ingredient (§2.2 step 3, unchanged), auto-picking the "closest" undersized
-   package would silently under-shop the recipe, so that's surfaced to a human
-   rather than guessed. Falls back to the old blended-score/margin check only
-   when quantity-fit is un-computable for every candidate (e.g. a stated amount
-   in a genuinely unparseable unit like "2 knobs") — there's nothing to convert
-   toward in that case, so the deterministic rule doesn't apply.
+   `requires_approval` even though price alone cleanly picks a winner. Falls back
+   to the old blended-score/margin check only when quantity-fit is un-computable
+   for every candidate (e.g. a stated amount in a genuinely unparseable unit like
+   "2 knobs") — there's nothing to convert toward in that case, so the
+   deterministic rule doesn't apply. **Multi-package purchases and a name-relevance
+   gate were added after this, both from live-data findings — see 3a/3b below.**
+3a. **Multi-package purchase math.** "No package covers the need" is not, on its
+   own, a reason to stop — `cli.ts`'s `approve` no longer hardcodes quantity 1 per
+   ingredient (that P1 limitation is resolved; `addToCart`'s `quantity` param was
+   already wired end-to-end, just never populated with anything but 1).
+   `quantityFitScore` (rank.ts) now generalizes "closest-over" across N units of
+   the same package — 800g of chicken breast from 1lb packages just means buying
+   2 (113% of need), the normal outcome, not a failure to match. Capped at
+   `MAX_AUTO_MULTI_UNIT_PURCHASE` (3): past that (or when even that many units of
+   the best candidate still can't reach the need), it's not auto-resolved — still
+   reported with the real unit count, but flagged `requires_approval` rather than
+   silently generating an oddly large cart line. `ProductCandidate.quantityToOrder`
+   carries this through to `cli.ts`'s `selectApprovedItems` → `ApprovedCartItem`.
+3b. **Text-relevance gate ahead of fit-tightness, within a coverage bucket.**
+   Found live: once multi-package math was added, "Kroger® Shaved Chicken" (a deli
+   product — "breast" doesn't appear in its name at all) beat real "chicken
+   breast" purely because 3×10oz landed a couple percentage points closer to the
+   exact target than 2×1lb of the actual cut. Coverage bucket (§2.2 step 3) still
+   decides first, but within a bucket, a text-relevance gap of at least
+   `RELEVANCE_GAP_THRESHOLD` (0.2) now wins outright before fit-tightness or price
+   ever get a vote — a candidate whose name is a clearly worse match for the
+   ingredient can't win just because its package math is numerically tighter.
+   **Known, disclosed remaining gap:** this can't tell "raw potatoes" from
+   "Sea Salt & Cracked Black Pepper Roasted FROZEN Redskin Potatoes" — both
+   literally contain the word "potatoes" and score identically on text relevance
+   (which only measures token overlap, not preparation state), so a single-word
+   ingredient name with no other distinguishing tokens still falls through to
+   fit-tightness/price, and a prepared/seasoned/frozen product can still win over
+   a raw one there. Not fixed here — a real, live-confirmed gap worth a future
+   pass (e.g. a small "prepared-food" keyword penalty), not something to assume
+   solved.
 4. Purchase-quantity math from a deterministic conversion table (volume↔fl oz/ml;
    standard densities like flour ≈120g/cup). Smallest-package-covers rule; surplus is
    normal. **Implemented (`density.ts`) as a small, explicit per-ingredient density
