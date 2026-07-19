@@ -15,6 +15,13 @@ function requireEnv(name: string): string {
 export const config = {
   dataDir: process.env.DATA_DIR ?? "./data",
 
+  // Postgres connection (Spec 4 §2.2). Local dev runs Postgres via
+  // docker-compose (or a native install); the CLI, web, and worker all point
+  // at the same DB. The default matches the docker-compose service; a local
+  // native install overrides it via DATABASE_URL in .env.
+  databaseUrl:
+    process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/recipecart",
+
   secrets: {
     // Read lazily (via getters) so importing config doesn't throw before
     // .env is needed — e.g. `recipecart --help` shouldn't require keys.
@@ -115,6 +122,25 @@ export const config = {
     rateLimitSafetyFraction: 0.95,
   },
 
+  jobs: {
+    // Worker poll interval for the Postgres-backed queue (Spec 4 §2.2, ~2s).
+    pollIntervalMs: 2_000,
+    // A re-submit of the same (user, url) within this window returns the
+    // existing job rather than creating a new one — a double-tapped share
+    // surfaces the in-flight job (Spec 4 §2.5 job-creation idempotency).
+    duplicateWindowMs: 10 * 60_000,
+    // Heartbeat staleness (Spec 4 A4-6, recommended 10 min): an in-progress
+    // job whose lock hasn't been refreshed within this window is considered
+    // abandoned (crashed worker) and is requeued (re-runnable stages) or moved
+    // to requires_user_intervention (mid-cart-mutation).
+    staleLockMs: 10 * 60_000,
+    // How often the worker sweeps for stale locks.
+    staleSweepIntervalMs: 30_000,
+    // Awaiting-review → Expired TTL (Spec 4 A4-6, recommended 14 days).
+    // Column/relation defined now; enforcement lands with the API slice.
+    reviewExpiryDays: 14,
+  },
+
   matching: {
     // Claude-delegated materiality judgment (Spec 3 §2.2). Same model as
     // reconcile for now; Haiku 4.5 is the natural cost lever here (see the
@@ -130,9 +156,6 @@ export const config = {
 
   get krogerTokenStatePath() {
     return path.join(this.dataDir, "kroger-token.enc.json");
-  },
-  get sqliteDbPath() {
-    return path.join(this.dataDir, "recipecart.db");
   },
   get tempMediaDir() {
     return path.join(this.dataDir, "tmp");

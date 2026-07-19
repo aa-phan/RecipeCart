@@ -19,7 +19,7 @@
 // time. `ApprovedCartItem.fallbacks` (below) only helps the DETECTABLE
 // failure case — Kroger actually rejecting an add — not this silent one;
 // there is currently no mechanical fix for the silent case at this API tier.
-import { getDb } from "../platform/db.js";
+import { getDb } from "../platform/database.js";
 import { logger } from "../platform/logger.js";
 import { addToCart } from "./client.js";
 import { loadToken, saveToken, isExpiredOrMissing, type StoredKrogerToken } from "./token_store.js";
@@ -75,7 +75,7 @@ function delay(ms: number): Promise<void> {
  * NOT attempt to trigger the interactive OAuth flow itself; that's a
  * CLI-level concern. */
 export async function ensureValidUserToken(): Promise<string> {
-  const stored = loadToken();
+  const stored = await loadToken();
   if (!stored) {
     throw new Error("Not connected to Kroger — run `recipecart auth` first");
   }
@@ -92,7 +92,7 @@ export async function ensureValidUserToken(): Promise<string> {
     refreshToken: refreshed.refresh_token ?? stored.refreshToken,
     expiresAt: Date.now() + refreshed.expires_in * 1000,
   };
-  saveToken(newToken);
+  await saveToken(newToken);
   return newToken.accessToken;
 }
 
@@ -113,51 +113,60 @@ function reasonFromAddToCartFailure(reason: unknown, status: number): string {
   return `Kroger API error ${status}`;
 }
 
-interface StoredCartRunRow {
-  id: string;
-  status: CartRunStatus;
-  results_json: string;
-}
-
-function loadExistingRun(idempotencyKey: string): CartRunResult | null {
+async function loadExistingRun(idempotencyKey: string): Promise<CartRunResult | null> {
   const db = getDb();
-  const row = db
-    .prepare(`SELECT id, status, results_json FROM cart_runs WHERE idempotency_key = ?`)
-    .get(idempotencyKey) as StoredCartRunRow | undefined;
+  const row = await db
+    .selectFrom("cart_runs")
+    .select(["id", "status", "results_json"])
+    .where("idempotency_key", "=", idempotencyKey)
+    .executeTakeFirst();
   if (!row) return null;
 
-  const results = JSON.parse(row.results_json) as CartItemResult[];
+  // results_json is jsonb — already parsed on read (no JSON.parse).
+  const results = row.results_json as CartItemResult[];
+  const status = row.status as CartRunStatus;
   return {
     jobId: row.id,
-    status: row.status,
+    status,
     results,
-    summary: summarize(row.status, results),
+    summary: summarize(status, results),
   };
 }
 
-function persistCartRun(
+async function persistCartRun(
   jobId: string,
   recipeId: string,
   idempotencyKey: string,
   status: CartRunStatus,
   results: CartItemResult[],
-): void {
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO cart_runs (id, recipe_id, idempotency_key, status, results_json, completed_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-  ).run(jobId, recipeId, idempotencyKey, status, JSON.stringify(results));
+): Promise<void> {
+  await getDb()
+    .insertInto("cart_runs")
+    .values({
+      id: jobId,
+      recipe_id: recipeId,
+      idempotency_key: idempotencyKey,
+      status,
+      results_json: JSON.stringify(results),
+      completed_at: new Date(),
+    })
+    .execute();
 }
 
 /** Updates an EXISTING cart_runs row in place (Spec 3 §2.3 point 5: a
  * requires_user_intervention run is resumable, re-attempting only remaining
  * items — see resumeCartRun). Never inserts a new row; the run keeps its
  * original id/idempotency_key throughout its resume history. */
-function updateCartRun(jobId: string, status: CartRunStatus, results: CartItemResult[]): void {
-  const db = getDb();
-  db.prepare(
-    `UPDATE cart_runs SET status = ?, results_json = ?, completed_at = datetime('now') WHERE id = ?`,
-  ).run(status, JSON.stringify(results), jobId);
+async function updateCartRun(
+  jobId: string,
+  status: CartRunStatus,
+  results: CartItemResult[],
+): Promise<void> {
+  await getDb()
+    .updateTable("cart_runs")
+    .set({ status, results_json: JSON.stringify(results), completed_at: new Date() })
+    .where("id", "=", jobId)
+    .execute();
 }
 
 /** An approved item counts as already-added if a stored `added` result
@@ -375,7 +384,7 @@ async function resumeCartRun(
     // prior attempt. Recompute the terminal status from what's actually
     // there rather than leaving it stuck at requires_user_intervention.
     const status = terminalStatusFor(alreadyAdded);
-    updateCartRun(jobId, status, alreadyAdded);
+    await updateCartRun(jobId, status, alreadyAdded);
     return { jobId, status, results: alreadyAdded, summary: summarize(status, alreadyAdded) };
   }
 
@@ -390,7 +399,7 @@ async function resumeCartRun(
       jobId,
       error: err instanceof Error ? err.message : String(err),
     });
-    updateCartRun(jobId, "requires_user_intervention", alreadyAdded);
+    await updateCartRun(jobId, "requires_user_intervention", alreadyAdded);
     return {
       jobId,
       status: "requires_user_intervention",
@@ -409,7 +418,7 @@ async function resumeCartRun(
   const status: CartRunStatus = authFailure
     ? "requires_user_intervention"
     : terminalStatusFor(merged);
-  updateCartRun(jobId, status, merged);
+  await updateCartRun(jobId, status, merged);
 
   logger.info("cart_runner: resume complete", {
     recipeId,
@@ -437,7 +446,7 @@ export async function runCartApproval(
   // as-is — do NOT re-run any cart adds. A run stuck in
   // requires_user_intervention is RESUMABLE (Spec 3 §2.3 point 5) rather than
   // replayed: re-attempt only the items not already added.
-  const existing = loadExistingRun(idempotencyKey);
+  const existing = await loadExistingRun(idempotencyKey);
   if (existing) {
     if (existing.status !== "requires_user_intervention") {
       logger.info("cart_runner: idempotent replay, returning stored result", {
@@ -456,7 +465,7 @@ export async function runCartApproval(
   if (approvedItems.length === 0) {
     const results: CartItemResult[] = [];
     const status: CartRunStatus = "failed";
-    persistCartRun(jobId, recipeId, idempotencyKey, status, results);
+    await persistCartRun(jobId, recipeId, idempotencyKey, status, results);
     return { jobId, status, results, summary: "No approved items were provided." };
   }
 
@@ -468,7 +477,7 @@ export async function runCartApproval(
   } catch (err) {
     const status: CartRunStatus = "requires_user_intervention";
     const results: CartItemResult[] = [];
-    persistCartRun(jobId, recipeId, idempotencyKey, status, results);
+    await persistCartRun(jobId, recipeId, idempotencyKey, status, results);
     logger.warn("cart_runner: no valid token, requires user intervention", {
       recipeId,
       jobId,
@@ -483,7 +492,7 @@ export async function runCartApproval(
   const status: CartRunStatus = authFailure
     ? "requires_user_intervention"
     : terminalStatusFor(results);
-  persistCartRun(jobId, recipeId, idempotencyKey, status, results);
+  await persistCartRun(jobId, recipeId, idempotencyKey, status, results);
 
   logger.info("cart_runner: run complete", {
     recipeId,

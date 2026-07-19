@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { Ingredient } from "../pipeline/schema.js";
 import type { KrogerProduct, KrogerProductSearchResponse } from "../kroger/types.js";
+import { getDb } from "../platform/database.js";
+import { resetDb } from "../platform/test-db.js";
 
 vi.mock("../kroger/auth.js", () => ({
   getAppToken: vi.fn(),
@@ -9,15 +11,44 @@ vi.mock("../kroger/client.js", () => ({
   searchProducts: vi.fn(),
 }));
 
-const dbRows: Record<string, unknown> = {};
-const preparedRun = vi.fn();
-const preparedGet = vi.fn();
-const preparedAll = vi.fn();
-vi.mock("../platform/db.js", () => ({
-  getDb: vi.fn(() => ({
-    prepare: vi.fn(() => ({ run: preparedRun, get: preparedGet, all: preparedAll })),
-  })),
-}));
+// matchRecipeAndPersist reads ingredient rows and upserts product_matches
+// against real Postgres (resetDb()) rather than a hand-rolled sqlite mock —
+// exercises the actual Kysely queries in index.ts.
+async function seedRecipeWithIngredient(
+  recipeId: string,
+  ingredientId: string,
+  overrides: {
+    canonical_name?: string;
+    quantity_value?: number;
+    quantity_unit?: string;
+    raw_text?: string;
+  } = {},
+): Promise<void> {
+  const db = getDb();
+  await db
+    .insertInto("recipes")
+    .values({
+      id: recipeId,
+      source_url: "https://x",
+      extraction_version: "v1",
+      status: "extracted",
+      recipe_json: JSON.stringify({}),
+    })
+    .execute();
+  await db
+    .insertInto("ingredients")
+    .values({
+      id: ingredientId,
+      recipe_id: recipeId,
+      canonical_name: overrides.canonical_name ?? "heavy cream",
+      quantity_value: overrides.quantity_value ?? 1,
+      quantity_unit: overrides.quantity_unit ?? "cup",
+      raw_text: overrides.raw_text ?? "1 cup heavy cream",
+      is_pantry_staple: false,
+      evidence_json: JSON.stringify([]),
+    })
+    .execute();
+}
 
 // Mocked so matchRecipe/matchRecipeAndPersist's WIRING to the materiality
 // pass can be tested (does it collect the right cases, apply verdicts
@@ -67,14 +98,11 @@ function product(overrides: Partial<KrogerProduct> = {}): KrogerProduct {
   } as KrogerProduct;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.restoreAllMocks();
   (searchProducts as ReturnType<typeof vi.fn>).mockReset();
   (getAppToken as ReturnType<typeof vi.fn>).mockReset();
-  dbRows.recipeId = undefined;
-  preparedRun.mockReset();
-  preparedGet.mockReset();
-  preparedAll.mockReset();
+  await resetDb();
   judgeMaterialityMock.mockReset();
   judgeMaterialityMock.mockResolvedValue(new Map()); // default: no verdicts (as if 0 cases)
 });
@@ -857,23 +885,19 @@ describe("matchRecipeAndPersist", () => {
       meta: { pagination: { start: 0, limit: 10, total: 1 } },
     } satisfies KrogerProductSearchResponse);
 
-    preparedAll.mockReturnValue([
-      {
-        id: "ingredient-1",
-        canonical_name: "heavy cream",
-        quantity_value: 1,
-        quantity_unit: "cup",
-        raw_text: "1 cup heavy cream",
-        is_pantry_staple: 0,
-      },
-    ]);
-    preparedGet.mockReturnValue(undefined); // no existing product_matches row
+    await seedRecipeWithIngredient("recipe-1", "ingredient-1");
 
     const results = await matchRecipeAndPersist("recipe-1", "01100002");
 
     expect(results).toHaveLength(1);
     expect(results[0]!.ingredientId).toBe("ingredient-1");
-    expect(preparedRun).toHaveBeenCalled(); // insert happened
+    // Upsert happened — a real product_matches row exists for this ingredient.
+    const row = await getDb()
+      .selectFrom("product_matches")
+      .selectAll()
+      .where("ingredient_id", "=", "ingredient-1")
+      .executeTakeFirst();
+    expect(row).toBeDefined();
   });
 });
 
@@ -1024,17 +1048,10 @@ describe("materiality wiring", () => {
       token_type: "bearer",
     });
     mockBroadenedSearchIngredient();
-    preparedAll.mockReturnValue([
-      {
-        id: "ingredient-1",
-        canonical_name: "cream cheese",
-        quantity_value: 1,
-        quantity_unit: "cup",
-        raw_text: "1 cup cream cheese",
-        is_pantry_staple: 0,
-      },
-    ]);
-    preparedGet.mockReturnValue(undefined);
+    await seedRecipeWithIngredient("recipe-1", "ingredient-1", {
+      canonical_name: "cream cheese",
+      raw_text: "1 cup cream cheese",
+    });
     judgeMaterialityMock.mockResolvedValue(
       new Map([["ingredient-1", { material: false, reason: "same product" }]]),
     );
@@ -1042,11 +1059,14 @@ describe("materiality wiring", () => {
     const results = await matchRecipeAndPersist("recipe-1", "01100002");
 
     expect(results[0]!.requiresApproval).toBe(false);
-    // The INSERT/UPDATE call's requires_approval arg (persistMatch's 4th
-    // bound param for an INSERT) must reflect the post-verdict value, 0/false.
-    expect(preparedRun).toHaveBeenCalled();
-    const insertArgs = preparedRun.mock.calls[0]!;
-    expect(insertArgs).toContain(0); // requires_approval bound as 0 (cleared)
+    // The persisted row's requires_approval must reflect the post-verdict
+    // value (false), not the deterministic pre-verdict flag.
+    const row = await getDb()
+      .selectFrom("product_matches")
+      .select("requires_approval")
+      .where("ingredient_id", "=", "ingredient-1")
+      .executeTakeFirstOrThrow();
+    expect(row.requires_approval).toBe(false);
   });
 });
 

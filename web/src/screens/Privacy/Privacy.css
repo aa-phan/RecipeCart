@@ -1,0 +1,45 @@
+.privacy {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+.privacy h1 {
+  font-size: 1.375rem;
+  margin: 0 0 1.25rem;
+}
+
+.privacy p {
+  color: #333;
+  margin: 0 0 1rem;
+}
+
+.privacy__error {
+  color: #8a1f11;
+  background: #fdecea;
+  border: 1px solid #f5c2bc;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.privacy__success {
+  color: #1a7f37;
+}
+
+.privacy__delete {
+  border: 1px solid #b91c1c;
+  background: #b91c1c;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.privacy__delete:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

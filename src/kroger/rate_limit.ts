@@ -8,7 +8,8 @@
 // (config.kroger.rateLimitSafetyFraction), leaving headroom rather than
 // tripping Kroger's hard limit mid-run. Self-contained to the kroger module —
 // the client calls into this; nothing else needs to know it exists.
-import { getDb } from "../platform/db.js";
+import { sql } from "kysely";
+import { getDb } from "../platform/database.js";
 import { config } from "../platform/config.js";
 
 export type RateLimitEndpoint = "products" | "locations" | "cart";
@@ -51,37 +52,37 @@ function ceilingFor(endpoint: RateLimitEndpoint): number {
   }
 }
 
-interface UsageRow {
-  count: number;
-}
-
 /** Today's (UTC) call count for an endpoint. 0 if none recorded yet. Useful
  * for tests and metrics logging as well as the guard below. */
-export function getUsage(endpoint: RateLimitEndpoint): number {
-  const db = getDb();
-  const row = db
-    .prepare(`SELECT count FROM kroger_api_usage WHERE day = ? AND endpoint = ?`)
-    .get(today(), endpoint) as UsageRow | undefined;
+export async function getUsage(endpoint: RateLimitEndpoint): Promise<number> {
+  const row = await getDb()
+    .selectFrom("kroger_api_usage")
+    .select("count")
+    .where("day", "=", today())
+    .where("endpoint", "=", endpoint)
+    .executeTakeFirst();
   return row?.count ?? 0;
 }
 
 /** Increment today's (UTC) counter for an endpoint by 1, upserting the row. */
-export function recordCall(endpoint: RateLimitEndpoint): void {
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO kroger_api_usage (day, endpoint, count) VALUES (?, ?, 1)
-     ON CONFLICT(day, endpoint) DO UPDATE SET count = count + 1`,
-  ).run(today(), endpoint);
+export async function recordCall(endpoint: RateLimitEndpoint): Promise<void> {
+  await getDb()
+    .insertInto("kroger_api_usage")
+    .values({ day: today(), endpoint, count: 1 })
+    .onConflict((oc) =>
+      oc.columns(["day", "endpoint"]).doUpdateSet({ count: sql`kroger_api_usage.count + 1` }),
+    )
+    .execute();
 }
 
 /** Throw RateLimitExceededError if today's usage for `endpoint` has reached
  * the configured safety fraction of its documented daily ceiling. Called
  * BEFORE a request is made, so the run backs off with headroom rather than
  * hitting Kroger's hard limit. */
-export function assertUnderLimit(endpoint: RateLimitEndpoint): void {
+export async function assertUnderLimit(endpoint: RateLimitEndpoint): Promise<void> {
   const ceiling = ceilingFor(endpoint);
   const threshold = ceiling * config.kroger.rateLimitSafetyFraction;
-  const count = getUsage(endpoint);
+  const count = await getUsage(endpoint);
   if (count >= threshold) {
     throw new RateLimitExceededError(endpoint, count, ceiling);
   }

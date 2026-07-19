@@ -1,4 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { getDb } from "../platform/database.js";
+import { resetDb } from "../platform/test-db.js";
 
 // Mock addToCart (src/kroger/client.ts) — CRITICAL: this must NEVER be the
 // real implementation in this test file, since the real one makes a live
@@ -29,68 +31,14 @@ vi.mock("../platform/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-// In-memory fake of the cart_runs table, standing in for src/platform/db.ts.
-// We don't touch the real db.ts file per the task boundary, and this keeps
-// tests fast/hermetic without a real sqlite file.
-interface FakeCartRunRow {
-  id: string;
-  recipe_id: string;
-  idempotency_key: string;
-  status: string;
-  results_json: string;
-}
-
-let fakeCartRuns: FakeCartRunRow[] = [];
-
-function makeFakeDb() {
-  return {
-    prepare(sql: string) {
-      if (sql.includes("SELECT")) {
-        return {
-          get(key: string) {
-            return fakeCartRuns.find((r) => r.idempotency_key === key);
-          },
-        };
-      }
-      if (sql.includes("INSERT")) {
-        return {
-          run(
-            id: string,
-            recipeId: string,
-            idempotencyKey: string,
-            status: string,
-            resultsJson: string,
-          ) {
-            fakeCartRuns.push({
-              id,
-              recipe_id: recipeId,
-              idempotency_key: idempotencyKey,
-              status,
-              results_json: resultsJson,
-            });
-          },
-        };
-      }
-      if (sql.includes("UPDATE")) {
-        return {
-          run(status: string, resultsJson: string, id: string) {
-            const row = fakeCartRuns.find((r) => r.id === id);
-            if (!row) throw new Error(`UPDATE on unknown cart_runs id: ${id}`);
-            row.status = status;
-            row.results_json = resultsJson;
-          },
-        };
-      }
-      throw new Error(`Unexpected SQL in fake db: ${sql}`);
-    },
-  };
-}
-
-vi.mock("../platform/db.js", () => ({
-  getDb: () => makeFakeDb(),
-}));
-
 const { runCartApproval, ensureValidUserToken } = await import("./cart_runner.js");
+
+/** cart_runs.recipe_id is a real FK — read the persisted rows for "recipe-1"
+ * straight from Postgres (real DB, via resetDb()) rather than a hand-rolled
+ * fake table. */
+async function cartRunsForRecipe1() {
+  return getDb().selectFrom("cart_runs").selectAll().where("recipe_id", "=", "recipe-1").execute();
+}
 
 const validToken = {
   accessToken: "valid-access-token",
@@ -98,9 +46,21 @@ const validToken = {
   expiresAt: Date.now() + 60 * 60_000,
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  fakeCartRuns = [];
+  await resetDb();
+  // cart_runs.recipe_id is a real FK — every test in this file uses
+  // "recipe-1", so seed its parent recipes row once here.
+  await getDb()
+    .insertInto("recipes")
+    .values({
+      id: "recipe-1",
+      source_url: "https://x",
+      extraction_version: "v1",
+      status: "extracted",
+      recipe_json: JSON.stringify({}),
+    })
+    .execute();
   loadTokenMock.mockReturnValue(validToken);
 });
 
@@ -177,9 +137,10 @@ describe("runCartApproval", () => {
     expect(addToCartMock).toHaveBeenCalledWith("111", 1, "valid-access-token");
     expect(addToCartMock).toHaveBeenCalledWith("222", 2, "valid-access-token");
 
-    // Persisted to the (fake) cart_runs table.
-    expect(fakeCartRuns).toHaveLength(1);
-    expect(fakeCartRuns[0]?.status).toBe("completed");
+    // Persisted to the real cart_runs table.
+    const rows = await cartRunsForRecipe1();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("completed");
   });
 
   it("partial failure: mixed added / needs_attention -> partially_completed, continues past bad item", async () => {
@@ -323,7 +284,7 @@ describe("runCartApproval", () => {
 
     expect(addToCartMock).not.toHaveBeenCalled();
     expect(second).toEqual(first);
-    expect(fakeCartRuns).toHaveLength(1);
+    expect(await cartRunsForRecipe1()).toHaveLength(1);
   });
 
   it("no token stored -> requires_user_intervention without calling addToCart", async () => {
@@ -444,8 +405,9 @@ describe("runCartApproval", () => {
         "idem-key-resume-1",
       );
       expect(first.status).toBe("requires_user_intervention");
-      expect(fakeCartRuns).toHaveLength(1);
-      const rowId = fakeCartRuns[0]!.id;
+      let rows = await cartRunsForRecipe1();
+      expect(rows).toHaveLength(1);
+      const rowId = rows[0]!.id;
 
       // Second call with the SAME idempotency key, after re-auth: item 2
       // should be the only one retried.
@@ -471,8 +433,9 @@ describe("runCartApproval", () => {
         ]),
       );
       // Same row updated in place, not a new one inserted.
-      expect(fakeCartRuns).toHaveLength(1);
-      expect(fakeCartRuns[0]!.id).toBe(rowId);
+      rows = await cartRunsForRecipe1();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.id).toBe(rowId);
     });
 
     it("recognizes an already-added item even when the added upc was a fallback, not item.upc", async () => {

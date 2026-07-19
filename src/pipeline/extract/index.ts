@@ -9,7 +9,9 @@
 // project's non-negotiable "media temp files deleted after every run" (Spec
 // 4), not something that can be skipped because reconcile or postprocess
 // threw partway through.
-import { getDb, tempDirFor, cleanupTempDir } from "../../platform/db.js";
+import crypto from "node:crypto";
+import { getDb } from "../../platform/database.js";
+import { tempDirFor, cleanupTempDir } from "../../platform/db.js";
 import { logger } from "../../platform/logger.js";
 import { validateRecipe, SCHEMA_VERSION, type Recipe } from "../schema.js";
 import { normalizeUrl } from "./normalize_url.js";
@@ -139,7 +141,7 @@ export async function extract(
     const recipe = postprocess(reconciled);
     metrics.resultType = recipe.result_type;
 
-    persist(recipe, jobId);
+    await persist(recipe, jobId);
     logger.info("extract: complete", { jobId, resultType: recipe.result_type });
 
     return { recipe, recipeId: jobId };
@@ -150,7 +152,7 @@ export async function extract(
     // card. Unclassified errors (bugs, env issues) are rethrown untouched.
     if (err instanceof ExtractionError) {
       metrics.failureClass = err.failureClass;
-      persistFailure(jobId, url, err);
+      await persistFailure(jobId, url, err);
       logger.warn("extract: failed", {
         jobId,
         failureClass: err.failureClass,
@@ -167,22 +169,43 @@ export async function extract(
 
 /** Record a terminal extraction failure as a `recipes` row (status='failed').
  * recipe_json is a small marker (the table requires it NOT NULL and there is
- * no recipe to store); the actionable data is in failure_class/failure_reason. */
-function persistFailure(recipeId: string, sourceUrl: string, err: ExtractionError): void {
+ * no recipe to store); the actionable data is in failure_class/failure_reason.
+ *
+ * UPSERT on id (Spec 4 §2.2/§2.3): a job's `extracting_recipe` stage is
+ * requeueable after a crashed worker (platform/jobs.ts REQUEUEABLE_STATES),
+ * and a retry reuses the same jobId/recipeId — a plain INSERT would collide
+ * on the `recipes` PK on a second attempt. Live-caught via a real
+ * crash-recovery test: a job retried after a stale-lock requeue hit a
+ * unique-constraint violation here instead of completing. */
+async function persistFailure(
+  recipeId: string,
+  sourceUrl: string,
+  err: ExtractionError,
+): Promise<void> {
   try {
-    const db = getDb();
-    db.prepare(
-      `INSERT INTO recipes
-         (id, source_url, extraction_version, title, status, recipe_json, failure_class, failure_reason)
-       VALUES (?, ?, ?, NULL, 'failed', ?, ?, ?)`,
-    ).run(
-      recipeId,
-      sourceUrl,
-      SCHEMA_VERSION,
-      JSON.stringify({ failed: true, failure_class: err.failureClass }),
-      err.failureClass,
-      err.userFacingReason,
-    );
+    const values = {
+      id: recipeId,
+      source_url: sourceUrl,
+      extraction_version: SCHEMA_VERSION,
+      title: null,
+      status: "failed" as const,
+      recipe_json: JSON.stringify({ failed: true, failure_class: err.failureClass }),
+      failure_class: err.failureClass,
+      failure_reason: err.userFacingReason,
+    };
+    await getDb()
+      .insertInto("recipes")
+      .values(values)
+      .onConflict((oc) =>
+        oc.column("id").doUpdateSet({
+          status: values.status,
+          recipe_json: values.recipe_json,
+          failure_class: values.failure_class,
+          failure_reason: values.failure_reason,
+          updated_at: new Date(),
+        }),
+      )
+      .execute();
   } catch (persistErr) {
     // Persisting the failure must never mask the original failure.
     logger.error("extract: could not persist failure row", {
@@ -192,24 +215,68 @@ function persistFailure(recipeId: string, sourceUrl: string, err: ExtractionErro
   }
 }
 
-function persist(recipe: Recipe, recipeId: string): void {
+/** Persists the recipe + its ingredient rows. UPSERT on `recipes.id` and
+ * REPLACE (delete-then-insert) the ingredient set, all in one transaction —
+ * same idempotency reasoning as persistFailure(): `extracting_recipe` is a
+ * requeueable stage (platform/jobs.ts), so a retry re-runs this with the
+ * SAME recipeId. A plain INSERT would collide on the recipes PK; a plain
+ * ingredients INSERT would silently DOUBLE the ingredient set (fresh random
+ * UUIDs each call, so no PK conflict to catch it) — both live-caught via a
+ * real crash-recovery test. Deleting first lets ON DELETE CASCADE clean up
+ * any product_matches from a prior partial attempt for the old ingredient
+ * ids, so the next matching_products run starts clean. */
+async function persist(recipe: Recipe, recipeId: string): Promise<void> {
   // Re-validate at the persistence boundary too — cheap, and guarantees
   // nothing between here and the DB write silently produced an
   // out-of-contract object.
   const validated = validateRecipe(recipe);
-  const db = getDb();
-  const id = recipeId;
   const title = validated.title?.value ?? null;
+  const recipeJson = JSON.stringify(validated);
 
-  db.prepare(
-    `INSERT INTO recipes (id, source_url, extraction_version, title, status, recipe_json)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    validated.source_url,
-    validated.extraction_version,
-    title,
-    "extracted",
-    JSON.stringify(validated),
-  );
+  await getDb()
+    .transaction()
+    .execute(async (trx) => {
+      await trx
+        .insertInto("recipes")
+        .values({
+          id: recipeId,
+          source_url: validated.source_url,
+          extraction_version: validated.extraction_version,
+          title,
+          status: "extracted",
+          recipe_json: recipeJson,
+        })
+        .onConflict((oc) =>
+          oc.column("id").doUpdateSet({
+            source_url: validated.source_url,
+            extraction_version: validated.extraction_version,
+            title,
+            status: "extracted",
+            recipe_json: recipeJson,
+            failure_class: null,
+            failure_reason: null,
+            updated_at: new Date(),
+          }),
+        )
+        .execute();
+
+      // Ingredient rows are persisted here (moved out of cli.ts) so BOTH the
+      // CLI and the Phase 3 worker get ingredients populated automatically
+      // after an extraction — the matcher reads these rows. Mapping
+      // preserved verbatim from the old cli.ts `ingredientsTableRows`.
+      await trx.deleteFrom("ingredients").where("recipe_id", "=", recipeId).execute();
+      const ingredientRows = validated.ingredients.map((ing) => ({
+        id: crypto.randomUUID(),
+        recipe_id: recipeId,
+        canonical_name: ing.canonical_name_en.value ?? "",
+        quantity_value: ing.quantity.value,
+        quantity_unit: ing.quantity.unit,
+        raw_text: ing.raw_text,
+        is_pantry_staple: ing.is_pantry_staple ? true : false,
+        evidence_json: JSON.stringify(ing.canonical_name_en.evidence ?? []),
+      }));
+      if (ingredientRows.length > 0) {
+        await trx.insertInto("ingredients").values(ingredientRows).execute();
+      }
+    });
 }

@@ -9,6 +9,10 @@ node_modules/
 # build output
 dist/
 *.tsbuildinfo
+# Vite's tsconfig.node.json compiles vite.config.ts to JS + declarations
+# in-place (web/) as a build byproduct — not source.
+vite.config.js
+vite.config.d.ts
 
 # local data (SQLite, temp media, encrypted Kroger OAuth token)
 data/

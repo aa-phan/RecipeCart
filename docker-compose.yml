@@ -1,0 +1,63 @@
+# Local dev environment for Phase 3 (Spec 4 §2.2 — "local dev via Docker
+# Compose mirroring the web/worker service shape" is itself P3 scope, but the
+# single production Dockerfile with yt-dlp/ffmpeg/OCR deps baked in is P4
+# (phases.md) — not built yet. Until then, `web`/`worker` here run directly
+# off the official node image with the repo volume-mounted, rather than a
+# custom image build. On this dev machine a native Homebrew postgresql@16 is
+# used instead of the `postgres` service below — either works locally; point
+# DATABASE_URL at whichever is actually running.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: recipecart
+    ports:
+      - "5432:5432"
+    volumes:
+      - recipecart_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d recipecart"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # API server (Spec 4 §2.2: "web — API only, never runs yt-dlp/ffmpeg/Claude").
+  web:
+    image: node:22
+    working_dir: /app
+    command: sh -c "npm install && npm run api"
+    volumes:
+      - .:/app
+      - recipecart_node_modules:/app/node_modules
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/recipecart
+      API_PORT: "3001"
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Job-queue worker (Spec 4 §2.2: "worker — polls the queue, runs everything
+  # long-running"). Needs the same secrets as the CLI (.env) for yt-dlp/OCR/
+  # ASR/Claude/Kroger — pass them through via env_file.
+  worker:
+    image: node:22
+    working_dir: /app
+    command: sh -c "npm install && npm run worker"
+    volumes:
+      - .:/app
+      - recipecart_node_modules:/app/node_modules
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/recipecart
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  recipecart_pgdata:
+  recipecart_node_modules:

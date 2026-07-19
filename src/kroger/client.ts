@@ -30,7 +30,7 @@ async function get<T>(path: string, params: Record<string, string>, token: strin
 /** Products API (Spec 3 §2.2 matcher). No per-user auth — call with an
  * app-level token from auth.getAppToken(). locationId is required to get
  * price/stock/fulfillment data back (Spec 3 §8). */
-export function searchProducts(
+export async function searchProducts(
   term: string,
   locationId: string,
   appToken: string,
@@ -40,26 +40,25 @@ export function searchProducts(
   // the documented daily ceiling, rather than tripping Kroger's hard limit
   // mid-run. assertUnderLimit throws BEFORE any network call; recordCall
   // only counts calls actually made.
-  assertUnderLimit("products");
-  return get<KrogerProductSearchResponse>(
+  await assertUnderLimit("products");
+  const result = await get<KrogerProductSearchResponse>(
     "/products",
     { "filter.term": term, "filter.locationId": locationId, "filter.limit": String(limit) },
     appToken,
-  ).then((result) => {
-    recordCall("products");
-    return result;
-  });
+  );
+  await recordCall("products");
+  return result;
 }
 
 /** Locations API (Spec 3 §14 store lookup). No per-user auth. */
-export function searchLocations(
+export async function searchLocations(
   zipCode: string,
   appToken: string,
   radiusMiles = 25,
   limit = 5,
 ): Promise<KrogerLocationSearchResponse> {
-  assertUnderLimit("locations");
-  return get<KrogerLocationSearchResponse>(
+  await assertUnderLimit("locations");
+  const result = await get<KrogerLocationSearchResponse>(
     "/locations",
     {
       "filter.zipCode.near": zipCode,
@@ -67,10 +66,9 @@ export function searchLocations(
       "filter.limit": String(limit),
     },
     appToken,
-  ).then((result) => {
-    recordCall("locations");
-    return result;
-  });
+  );
+  await recordCall("locations");
+  return result;
 }
 
 export type AddToCartResult = { ok: true } | { ok: false; status: number; reason: unknown };
@@ -84,7 +82,7 @@ export async function addToCart(
   quantity: number,
   userAccessToken: string,
 ): Promise<AddToCartResult> {
-  assertUnderLimit("cart");
+  await assertUnderLimit("cart");
   const response = await fetch(`${config.kroger.apiBaseUrl}/cart/add`, {
     method: "PUT",
     headers: {
@@ -95,7 +93,7 @@ export async function addToCart(
   });
   // Count the call whether Kroger accepted or rejected it — either way it
   // consumed one against the documented daily cart-add ceiling.
-  recordCall("cart");
+  await recordCall("cart");
 
   if (response.status === 204) {
     return { ok: true };

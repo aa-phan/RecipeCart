@@ -1,0 +1,213 @@
+.review {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1rem 1rem 3rem;
+}
+
+.review__header {
+  margin-bottom: 1.5rem;
+}
+
+.review__source {
+  color: #666;
+  margin: 0.25rem 0 0.75rem;
+  word-break: break-word;
+}
+
+.review__banner {
+  background: #eef2ff;
+  color: #33389b;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.review__stage-line {
+  color: #666;
+}
+
+.review__error {
+  color: #b3261e;
+  background: #fdeaea;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+}
+
+.review__ingredients {
+  list-style: none;
+  margin: 1rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ingredient-row {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.ingredient-row__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ingredient-row__name {
+  font-weight: 600;
+  min-width: 8rem;
+  flex: 1 1 auto;
+}
+
+.ingredient-row__quantity {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.ingredient-row__quantity-input {
+  width: 4.5rem;
+}
+
+.ingredient-row__unit-input {
+  width: 5rem;
+}
+
+.ingredient-row__pantry-chip {
+  background: #fff4e0;
+  color: #a15c00;
+  font-size: 0.8em;
+  font-weight: 600;
+  padding: 0.15em 0.6em;
+  border-radius: 999px;
+}
+
+.ingredient-row__why,
+.ingredient-row__remove {
+  font-size: 0.85em;
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 0.25em 0.6em;
+  cursor: pointer;
+}
+
+.ingredient-row__remove {
+  color: #b3261e;
+  border-color: #f3c8c5;
+}
+
+.ingredient-row__raw-text {
+  color: #888;
+  font-size: 0.85em;
+  margin: 0.4rem 0 0;
+}
+
+.ingredient-row__error {
+  color: #b3261e;
+  font-size: 0.85em;
+  margin: 0.4rem 0 0;
+}
+
+.evidence-snippet {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: #fafafa;
+  border-radius: 6px;
+  font-size: 0.85em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.evidence-snippet__source {
+  font-weight: 600;
+  color: #555;
+  margin-right: 0.5em;
+}
+
+.evidence-snippet__text {
+  color: #333;
+}
+
+.review__empty {
+  color: #666;
+}
+
+.review__add-ingredient {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.review__add-ingredient input {
+  flex: 1;
+}
+
+.approve-button {
+  margin-top: 1.5rem;
+}
+
+.approve-button__button {
+  width: 100%;
+  padding: 0.9rem;
+  font-size: 1rem;
+  font-weight: 700;
+  background: #1e7e34;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.approve-button__button:disabled {
+  background: #a7c9b0;
+  cursor: not-allowed;
+}
+
+.approve-button__error {
+  color: #b3261e;
+  margin-bottom: 0.5rem;
+}
+
+.match-picker {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.match-picker__candidates {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.match-picker__candidate label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.match-picker__reason,
+.match-picker__error {
+  font-size: 0.85em;
+  color: #666;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

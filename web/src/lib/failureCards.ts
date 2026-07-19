@@ -1,0 +1,67 @@
+// Lookup from FailureClass (mirrors src/pipeline/extract/failures.ts's
+// FailureClass union) to a plain-language failure card: one message + one
+// recovery action, per Spec 1 §16. Extended with a couple of
+// operationally-relevant non-extraction classes (Kroger connect/expiry, cart
+// partial failure, automation outage) so the same lookup can back
+// FailureCard.tsx across the app, not just extraction failures.
+
+export type FailureClass =
+  | "download_failed_permanent"
+  | "download_failed_transient"
+  | "model_call_failed"
+  | "schema_validation_failed"
+  | "kroger_not_connected"
+  | "kroger_token_expired"
+  | "cart_partially_failed"
+  | "automation_unavailable";
+
+export interface FailureCard {
+  message: string;
+  recoveryAction: string;
+}
+
+const FAILURE_CARDS: Record<FailureClass, FailureCard> = {
+  download_failed_permanent: {
+    message:
+      "This video couldn't be downloaded — it may be private, deleted, or region-restricted.",
+    recoveryAction: "Try a different link.",
+  },
+  download_failed_transient: {
+    message: "Downloading this video kept failing (network or TikTok-side issue).",
+    recoveryAction: "Retry.",
+  },
+  model_call_failed: {
+    message: "Extracting the recipe failed.",
+    recoveryAction: "Retry.",
+  },
+  schema_validation_failed: {
+    message: "The recipe couldn't be structured reliably from this video.",
+    recoveryAction: "Retry, or edit the ingredients manually.",
+  },
+  kroger_not_connected: {
+    message: "Your Kroger account isn't connected yet.",
+    recoveryAction: "Connect your Kroger account to add items to a cart.",
+  },
+  kroger_token_expired: {
+    message: "Your Kroger connection has expired.",
+    recoveryAction: "Reconnect your Kroger account.",
+  },
+  cart_partially_failed: {
+    message: "Some items couldn't be added to your cart.",
+    recoveryAction: "Review the itemized list — the rest of your cart is unaffected.",
+  },
+  automation_unavailable: {
+    message: "Adding items to your cart is temporarily unavailable.",
+    recoveryAction: "Your recipe is saved — try adding to cart again later.",
+  },
+};
+
+const FALLBACK_CARD: FailureCard = {
+  message: "Something went wrong.",
+  recoveryAction: "Try again, or come back later.",
+};
+
+export function failureCardFor(failureClass: string | undefined): FailureCard {
+  if (!failureClass) return FALLBACK_CARD;
+  return FAILURE_CARDS[failureClass as FailureClass] ?? FALLBACK_CARD;
+}

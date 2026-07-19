@@ -9,7 +9,7 @@ import type { Ingredient } from "../pipeline/schema.js";
 import { getAppToken } from "../kroger/auth.js";
 import { searchProducts } from "../kroger/client.js";
 import type { KrogerProductItem } from "../kroger/types.js";
-import { getDb } from "../platform/db.js";
+import { getDb } from "../platform/database.js";
 import { logger } from "../platform/logger.js";
 import { config } from "../platform/config.js";
 import {
@@ -664,7 +664,7 @@ interface IngredientRow {
   quantity_value: number | null;
   quantity_unit: string | null;
   raw_text: string | null;
-  is_pantry_staple: number;
+  is_pantry_staple: boolean;
 }
 
 function ingredientFromDbRow(row: IngredientRow): Ingredient {
@@ -675,7 +675,7 @@ function ingredientFromDbRow(row: IngredientRow): Ingredient {
       : { value: null, null_reason: "not populated on ingredients row" },
     raw_text: rawText,
     quantity: { value: row.quantity_value, unit: row.quantity_unit, raw_text: rawText },
-    is_pantry_staple: row.is_pantry_staple === 1,
+    is_pantry_staple: row.is_pantry_staple,
   } as Ingredient;
 }
 
@@ -691,12 +691,11 @@ export async function matchRecipeAndPersist(
   options: MatchOptions = {},
 ): Promise<IngredientMatch[]> {
   const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT id, canonical_name, quantity_value, quantity_unit, raw_text, is_pantry_staple
-       FROM ingredients WHERE recipe_id = ?`,
-    )
-    .all(recipeId) as unknown as IngredientRow[];
+  const rows = (await db
+    .selectFrom("ingredients")
+    .select(["id", "canonical_name", "quantity_value", "quantity_unit", "raw_text", "is_pantry_staple"])
+    .where("recipe_id", "=", recipeId)
+    .execute()) as IngredientRow[];
 
   const token = await getAppToken();
   const results: IngredientMatch[] = [];
@@ -714,22 +713,9 @@ export async function matchRecipeAndPersist(
   // the post-judgment state rather than the deterministic-only flags.
   await applyMateriality(results, options);
   for (const match of results) {
-    persistMatch(match);
+    await persistMatch(match);
   }
   return results;
-}
-
-interface OldestMatchRow {
-  oldest: string | null;
-}
-
-/** Parses a `datetime('now')`-style sqlite timestamp ("YYYY-MM-DD HH:MM:SS",
- * always UTC) into epoch ms. LIVE-VERIFIED gotcha: `new Date(sqliteString)`
- * WITHOUT this fix parses the string as LOCAL time, not UTC — a real ~5h skew
- * in this environment's timezone. Never parse a sqlite datetime string with a
- * bare `new Date(...)`; always convert to a proper ISO string first. */
-function parseSqliteUtcDatetime(s: string): number {
-  return new Date(s.replace(" ", "T") + "Z").getTime();
 }
 
 /** Age (ms) since a recipe's Kroger product-match search results were last
@@ -737,18 +723,22 @@ function parseSqliteUtcDatetime(s: string): number {
  * matchRecipeAndPersist always re-matches every ingredient of a recipe in one
  * pass (a partial per-ingredient staleness signal wouldn't be actionable).
  * Returns null when the recipe has no persisted matches yet (nothing to be
- * stale — a first match is never "stale"). */
-function matchAgeMs(recipeId: string): number | null {
+ * stale — a first match is never "stale").
+ *
+ * Postgres `timestamptz` comes back as a JS `Date`, so the old sqlite
+ * `parseSqliteUtcDatetime` local-vs-UTC workaround is gone — `.getTime()` on
+ * the returned Date is correct with no string parsing. */
+async function matchAgeMs(recipeId: string): Promise<number | null> {
   const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT MIN(pm.updated_at) as oldest
-       FROM product_matches pm JOIN ingredients i ON i.id = pm.ingredient_id
-       WHERE i.recipe_id = ?`,
-    )
-    .get(recipeId) as unknown as OldestMatchRow | undefined;
-  if (!row?.oldest) return null;
-  return Date.now() - parseSqliteUtcDatetime(row.oldest);
+  const row = await db
+    .selectFrom("product_matches as pm")
+    .innerJoin("ingredients as i", "i.id", "pm.ingredient_id")
+    .select((eb) => eb.fn.min("pm.updated_at").as("oldest"))
+    .where("i.recipe_id", "=", recipeId)
+    .executeTakeFirst();
+  const oldest = row?.oldest as Date | null | undefined;
+  if (!oldest) return null;
+  return Date.now() - oldest.getTime();
 }
 
 /** Spec 3 §2.2 staleness rule (A3-6): "re-run search if the recipe has sat in
@@ -757,8 +747,8 @@ function matchAgeMs(recipeId: string): number | null {
  * config.kroger.searchStalenessWindowMs. A recipe with no matches yet is
  * NOT stale (there's nothing to refresh — that's the normal first-match
  * case, not a staleness condition). */
-export function isMatchStale(recipeId: string): boolean {
-  const age = matchAgeMs(recipeId);
+export async function isMatchStale(recipeId: string): Promise<boolean> {
+  const age = await matchAgeMs(recipeId);
   return age !== null && age > config.kroger.searchStalenessWindowMs;
 }
 
@@ -773,48 +763,41 @@ export async function refreshIfStale(
   locationId: string,
   options: MatchOptions = {},
 ): Promise<IngredientMatch[] | null> {
-  if (!isMatchStale(recipeId)) return null;
+  if (!(await isMatchStale(recipeId))) return null;
   logger.info("matcher: persisted matches are stale, re-running search before cart approval", {
     recipeId,
   });
   return matchRecipeAndPersist(recipeId, locationId, options);
 }
 
-function persistMatch(match: IngredientMatch): void {
+async function persistMatch(match: IngredientMatch): Promise<void> {
   const db = getDb();
-  const now = new Date().toISOString();
-  const existing = db
-    .prepare(`SELECT id FROM product_matches WHERE ingredient_id = ?`)
-    .get(match.ingredientId) as unknown as { id: string } | undefined;
-
+  // product_matches.ingredient_id is UNIQUE (Postgres schema), so a single
+  // upsert replaces the old select-then-update/insert. candidates_json is
+  // jsonb (stringify on write); requires_approval/is_approved are real
+  // booleans; updated_at is bumped to now() so the staleness check
+  // (matchAgeMs → isMatchStale) sees a re-match as fresh.
   const candidatesJson = JSON.stringify(match.candidates);
-  if (existing) {
-    db.prepare(
-      `UPDATE product_matches
-       SET candidates_json = ?, requires_approval = ?, approval_reason = ?, updated_at = ?
-       WHERE id = ?`,
-    ).run(
-      candidatesJson,
-      match.requiresApproval ? 1 : 0,
-      match.approvalReason ?? null,
-      now,
-      existing.id,
-    );
-  } else {
-    db.prepare(
-      `INSERT INTO product_matches
-         (id, ingredient_id, candidates_json, selected_product_id, requires_approval, approval_reason, is_approved, created_at, updated_at)
-       VALUES (?, ?, ?, NULL, ?, ?, 0, ?, ?)`,
-    ).run(
-      randomUUID(),
-      match.ingredientId,
-      candidatesJson,
-      match.requiresApproval ? 1 : 0,
-      match.approvalReason ?? null,
-      now,
-      now,
-    );
-  }
+  await db
+    .insertInto("product_matches")
+    .values({
+      id: randomUUID(),
+      ingredient_id: match.ingredientId,
+      candidates_json: candidatesJson,
+      selected_product_id: null,
+      requires_approval: match.requiresApproval,
+      approval_reason: match.approvalReason ?? null,
+      is_approved: false,
+    })
+    .onConflict((oc) =>
+      oc.column("ingredient_id").doUpdateSet({
+        candidates_json: candidatesJson,
+        requires_approval: match.requiresApproval,
+        approval_reason: match.approvalReason ?? null,
+        updated_at: new Date(),
+      }),
+    )
+    .execute();
 }
 
 function truncate(s: string, max: number): string {

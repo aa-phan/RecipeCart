@@ -43,6 +43,10 @@ export default [
   },
   prettier,
   {
-    ignores: ["dist/**", "node_modules/**", "data/**", "spikes/tmp/**"],
+    // web/ is a separate Vite/React project with its own tsconfig and build
+    // output (web/dist) — not part of this root config's TS project binding.
+    // It has no ESLint setup of its own yet; excluding it here rather than
+    // wrongly linting its built bundle as untyped legacy JS.
+    ignores: ["dist/**", "node_modules/**", "data/**", "spikes/tmp/**", "web/**"],
   },
 ];
