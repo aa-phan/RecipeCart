@@ -12,7 +12,10 @@
     "cli": "tsx src/cli.ts",
     "worker": "tsx src/worker/index.ts",
     "api": "tsx src/api/index.ts",
+    "start:api": "node dist/api/index.js",
+    "start:worker": "node dist/worker/index.js",
     "migrate": "tsx src/platform/migrate.ts",
+    "start:migrate": "node dist/platform/migrate.js",
     "spike:tiktok": "tsx spikes/tiktok-media-spike.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -24,6 +27,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
     "@fastify/cookie": "^11.0.2",
+    "@fastify/static": "^10.1.0",
     "@huggingface/transformers": "^4.2.0",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",

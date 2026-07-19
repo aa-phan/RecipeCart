@@ -1,0 +1,72 @@
+# Railway config-as-code for the "api" service (Spec 4 §2.7 deploy model:
+# ONE Dockerfile/image, TWO Railway services — api + worker — pointed at the
+# same image with different start commands).
+#
+# IMPORTANT — honesty note on what is and isn't config-as-code here:
+# As far as I could verify, Railway's railway.json/railway.toml schema
+# (https://railway.app/railway.schema.json) describes a SINGLE service's
+# build/deploy settings. There is no documented top-level construct in that
+# schema for declaring multiple distinct services (with different start
+# commands/volumes) from one file. I did not find a reliable way to express
+# "two services, one image" purely declaratively, and I'm not confident
+# enough in any undocumented multi-service syntax to fabricate it here.
+#
+# So the actual setup is config-as-code PER SERVICE + one manual dashboard
+# step to create the services and wire each to its config file:
+#
+#   1. In the Railway project, create two services from this same repo
+#      (Dashboard → New → GitHub Repo, done twice, or "New Service" twice
+#      pointing at the same repo). This step is dashboard-driven; I'm not
+#      aware of a way to script "create N services in a project" via a
+#      committed config file.
+#   2. Name one service "api", the other "worker" (arbitrary but match
+#      the names Spec 4 §2.7 uses).
+#   3. For the "api" service: Settings → Config-as-code path → point it at
+#      this file (`railway.toml`, the repo-root default Railway looks for
+#      automatically — so this may need no manual path entry at all for
+#      the api service specifically).
+#   4. For the "worker" service: Settings → Config-as-code path → point it
+#      at `railway.worker.toml` (see that file). This step DOES require a
+#      manual dashboard field, since Railway's auto-discovery only picks up
+#      the root `railway.json`/`railway.toml` by default and a second
+#      service needs to be told explicitly to use a different file.
+#   5. For the "worker" service only: Settings → Volumes → attach a volume,
+#      mounted at the path DATA_DIR points to (default `/app/data`, matching
+#      this Dockerfile's WORKDIR). This is unavailable as config-as-code as
+#      far as I could verify — volumes are attached via the dashboard (or
+#      Railway's GraphQL API directly, not the railway.json/toml schema).
+#   6. Environment variables (DATABASE_URL, ANTHROPIC_API_KEY,
+#      KROGER_CLIENT_ID/SECRET, KROGER_TOKEN_KEY, KROGER_REDIRECT_URI,
+#      WEB_APP_URL, PGSSL, DATA_DIR) are set per-service via the dashboard
+#      or `railway variables set` — intentionally NOT in this file, since
+#      it's meant to be committed and none of those are safe to commit.
+#      PORT is injected by Railway itself for the api service; do not set
+#      it manually.
+#
+# Everything below IS real, verified-against-schema config-as-code for the
+# "api" service.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Compiled JS via `node`, not `tsx` (a devDependency, and not installed in
+# the runtime stage's `npm ci --omit=dev`) — matches package.json's
+# start:api script.
+startCommand = "npm run start:api"
+
+# No healthcheckPath set: src/api/routes/health.ts exists but is not yet
+# wired into src/api/server.ts (commented out pending ticket B5). Once B5
+# lands and GET /health is live (with skipAuth), add:
+#   healthcheckPath = "/health"
+#   healthcheckTimeout = 300
+# Until then Railway falls back to TCP-port-open as its readiness check.
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# The api service is stateless (no volume) — safe to run >1 replica behind
+# Railway's router if load ever warrants it. Left at 1 for now; bump via
+# dashboard or here once there's a reason to.
+numReplicas = 1

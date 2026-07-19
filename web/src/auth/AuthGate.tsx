@@ -1,7 +1,14 @@
 import { useState, type FormEvent, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 
 const AUTHED_FLAG_KEY = "recipecart_authed";
 const DEVICE_TOKEN_COOKIE = "recipecart_device_token";
+
+// Routes reachable before a device token exists. /setup mints the FIRST
+// token (Spec 1 A1-2) — gating it behind "you already have a token" is a
+// chicken-and-egg bug for a genuinely first-time visitor, so it must render
+// even when AuthGate would otherwise show the paste-token form.
+const UNGATED_PATHS = new Set(["/setup"]);
 
 function isAuthed(): boolean {
   return typeof window !== "undefined" && localStorage.getItem(AUTHED_FLAG_KEY) === "1";
@@ -28,8 +35,9 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [authed, setAuthed] = useState(isAuthed);
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const location = useLocation();
 
-  if (authed) return <>{children}</>;
+  if (authed || UNGATED_PATHS.has(location.pathname)) return <>{children}</>;
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();

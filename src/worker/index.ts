@@ -15,6 +15,7 @@ import { closeDb } from "../platform/database.js";
 import { migrateToLatest } from "../platform/migrate.js";
 import { claimNextJob, requeueStaleJobs } from "../platform/jobs.js";
 import { runJob } from "./state_machine.js";
+import { sweepTempMedia, expireStaleReviews } from "./sweeps.js";
 
 const workerId = `${os.hostname()}-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
 
@@ -39,6 +40,8 @@ async function main(): Promise<void> {
   await migrateToLatest();
 
   let lastSweep = 0;
+  let lastReviewExpirySweep = 0;
+  let lastTempMediaSweep = 0;
   while (!shuttingDown) {
     // Periodically reclaim jobs abandoned by a crashed worker.
     if (Date.now() - lastSweep > config.jobs.staleSweepIntervalMs) {
@@ -51,6 +54,32 @@ async function main(): Promise<void> {
         });
       }
       lastSweep = Date.now();
+    }
+
+    // Periodically expire awaiting_review jobs past reviewExpiryDays.
+    if (Date.now() - lastReviewExpirySweep > config.jobs.reviewExpirySweepIntervalMs) {
+      try {
+        const acted = await expireStaleReviews();
+        if (acted > 0) logger.info("worker: expired stale reviews", { count: acted });
+      } catch (err) {
+        logger.error("worker: review-expiry sweep failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      lastReviewExpirySweep = Date.now();
+    }
+
+    // Periodically sweep temp-media dirs left behind by a hard crash.
+    if (Date.now() - lastTempMediaSweep > config.tempMedia.sweepIntervalMs) {
+      try {
+        const { removed, scannedCount } = await sweepTempMedia();
+        if (removed > 0) logger.info("worker: temp-media sweep", { removed, scannedCount });
+      } catch (err) {
+        logger.error("worker: temp-media sweep failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      lastTempMediaSweep = Date.now();
     }
 
     let job;

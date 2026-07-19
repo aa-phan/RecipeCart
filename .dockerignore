@@ -1,0 +1,44 @@
+# Keep the build context small and avoid copying anything stale/local into
+# the image (dependencies and build output are (re)installed/(re)compiled
+# inside the Dockerfile stages, never copied in from the host).
+
+node_modules
+dist
+
+# Local dev data: SQLite leftovers, per-job temp media, encrypted Kroger
+# token, OCR/ASR model caches. Never belongs in the image — the worker
+# service gets a fresh Railway volume mounted at DATA_DIR instead.
+data
+
+# Web frontend: built inside the image (Dockerfile builder stage runs
+# `cd web && npm ci && npm run build`) and served by the api process via
+# @fastify/static (src/api/server.ts) — one Railway service for both API and
+# web app. node_modules/dist are excluded since they're (re)produced inside
+# the image, never copied in from the host.
+web/node_modules
+web/dist
+
+# VCS / editor / OS cruft
+.git
+.gitignore
+.DS_Store
+.vscode
+.idea
+
+# Secrets and local env — never bake these into an image layer.
+.env
+.env.*
+!.env.example
+
+# Local-only / non-runtime artifacts
+spikes
+files
+files.zip
+*.log
+npm-debug.log*
+.claude
+*.tsbuildinfo
+
+# Not needed at build or runtime
+README.md
+docker-compose.yml

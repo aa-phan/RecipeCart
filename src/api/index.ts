@@ -2,10 +2,11 @@
 // the web/API process never runs yt-dlp/ffmpeg/Claude directly (Spec 4 §2.2).
 import { buildServer } from "./server.js";
 import { closeDb } from "../platform/database.js";
+import { config } from "../platform/config.js";
 
 async function main(): Promise<void> {
   const app = await buildServer();
-  const port = Number(process.env.API_PORT ?? 3001);
+  const port = config.apiPort;
   const host = "0.0.0.0";
 
   await app.listen({ port, host });

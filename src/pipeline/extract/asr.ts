@@ -30,7 +30,15 @@ export interface AsrSegment {
 let transcriberPromise: Promise<AutomaticSpeechRecognitionPipeline> | undefined;
 function getTranscriber(): Promise<AutomaticSpeechRecognitionPipeline> {
   if (!transcriberPromise) {
-    transcriberPromise = pipeline("automatic-speech-recognition", config.extraction.whisperModel);
+    // Without an explicit cache_dir, transformers.js caches the ~145MB
+    // Whisper model under node_modules/@huggingface/transformers/.cache —
+    // fine for local dev, but on a Railway worker that directory is reset
+    // on every deploy (only DATA_DIR is a persistent volume), so the model
+    // would silently re-download on every deploy. Mirror ocr.ts's cachePath
+    // convention and point it at the same persistent data dir.
+    transcriberPromise = pipeline("automatic-speech-recognition", config.extraction.whisperModel, {
+      cache_dir: config.dataDir,
+    });
   }
   return transcriberPromise;
 }

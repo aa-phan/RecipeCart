@@ -45,6 +45,15 @@ function hashToken(token: string): string {
 async function authPlugin(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", async (request) => {
     if (request.routeOptions.config?.skipAuth) return;
+    // The web SPA's static assets (Phase 4: served from this same process
+    // via @fastify/static, see server.ts) are registered by a third-party
+    // plugin that doesn't expose a way to attach `config.skipAuth` per
+    // route. They're intentionally public anyway: the HTML/JS/CSS shell
+    // carries no user data — AuthGate (web/src/auth/AuthGate.tsx) decides
+    // client-side, after load, whether to show the paste-token form before
+    // any *API* call is made. Only `/api/*` routes need the device-token
+    // gate; everything else this process serves is the public app shell.
+    if (!request.url.split("?")[0]!.startsWith("/api/")) return;
 
     const token = extractToken(request);
     if (!token) throw unauthorized();

@@ -1,0 +1,63 @@
+# Railway config-as-code for the "worker" service. Companion to
+# railway.toml (the "api" service) — see the long comment there for the
+# honest breakdown of what Railway lets you express declaratively (per-
+# service build/deploy settings) vs what requires a manual dashboard step
+# (creating the second service, pointing it at THIS file via Settings →
+# Config-as-code path, and attaching its volume). Not auto-discovered by
+# Railway on its own — a non-default filename, so it only takes effect once
+# a service's Config-as-code path is manually set to
+# "railway.worker.toml" in the dashboard.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Same image as the api service, different entrypoint — runs everything
+# long-running (yt-dlp/ffmpeg/OCR/ASR/Claude/Kroger); never the api process.
+startCommand = "npm run start:worker"
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Exactly one replica: the job-claim loop (claimNextJob / FOR UPDATE SKIP
+# LOCKED in src/platform/jobs.ts) is written to be safe under concurrent
+# workers, but there's no benefit to >1 replica yet, and a shared DATA_DIR
+# volume (see below) mounted read-write by multiple replicas would need
+# more care than this MVP has put in. Bump deliberately, not accidentally.
+numReplicas = 1
+
+# No healthcheckPath: the worker doesn't listen on a port at all (it's a
+# polling loop, not an HTTP server), so Railway's HTTP healthcheck doesn't
+# apply here. Leave unset — Railway falls back to process-alive as the
+# readiness signal for non-web services.
+
+# --- Volume (NOT expressible in this file — dashboard/API only) ---
+# Settings → Volumes → attach a volume, mounted at the path DATA_DIR
+# resolves to inside the container. This Dockerfile's WORKDIR is /app and
+# config.ts defaults DATA_DIR to "./data" (i.e. /app/data at runtime unless
+# overridden) — so mount the volume at /app/data, OR set the DATA_DIR env
+# var on this service to wherever Railway mounts it, whichever is less
+# error-prone to keep in sync. This volume is confirmed to hold:
+#   - data/tmp/            per-job temp media (download/extract working set)
+#   - tesseract.js's OCR cache (eng.traineddata, ~5MB, downloaded on first
+#     OCR) — src/pipeline/extract/ocr.ts passes `cachePath: config.dataDir`
+#     explicitly to createWorker(), so this one IS under DATA_DIR.
+#
+# OPEN ISSUE (verified against source, not assumed): the Whisper ASR model
+# cache is NOT under DATA_DIR. src/pipeline/extract/asr.ts calls
+# `pipeline("automatic-speech-recognition", config.extraction.whisperModel)`
+# with no `cache_dir` option, so @huggingface/transformers falls back to its
+# own default — per node_modules/@huggingface/transformers/src/env.js,
+# `DEFAULT_CACHE_DIR` is `<the package's own install directory>/.cache/`
+# (inside node_modules, NOT cwd, NOT DATA_DIR). That means:
+#   (a) the ~145MB Whisper model will re-download on every deploy/restart
+#       even with this volume attached, since node_modules isn't on it, and
+#   (b) mounting the volume over node_modules instead would be wrong (it'd
+#       shadow the freshly-installed prod deps from the image).
+# Not something I can fix here — src/ is owned by another workstream. The
+# fix is almost certainly a one-line change in asr.ts's `pipeline(...)` call
+# (pass `{ cache_dir: config.dataDir }`, mirroring ocr.ts's pattern) so the
+# model cache lands on the same volume. Flagging explicitly rather than
+# silently assuming it already works.
+# The api service does NOT get a volume (stateless, per the deploy model).

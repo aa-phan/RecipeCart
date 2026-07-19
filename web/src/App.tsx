@@ -16,6 +16,7 @@ const FailureCard = React.lazy(() => import("./screens/FailureCard/FailureCard")
 const ConnectKroger = React.lazy(() => import("./screens/ConnectKroger/ConnectKroger"));
 const Preferences = React.lazy(() => import("./screens/Preferences/Preferences"));
 const Privacy = React.lazy(() => import("./screens/Privacy/Privacy"));
+const Setup = React.lazy(() => import("./screens/Setup/Setup"));
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/connect-kroger" element={<ConnectKroger />} />
           <Route path="/preferences" element={<Preferences />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/setup" element={<Setup />} />
         </Routes>
       </Suspense>
     </AuthGate>

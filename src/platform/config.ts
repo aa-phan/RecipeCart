@@ -21,6 +21,13 @@ export const config = {
   // native install overrides it via DATABASE_URL in .env.
   databaseUrl:
     process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/recipecart",
+  // Managed Postgres (Railway and most cloud providers) requires TLS on the
+  // connection but presents a cert not chained to a public CA, so plain
+  // `ssl: true` fails locally-verified connections. `PGSSL=require` (or any
+  // non-empty value) opts in; unset/local dev stays plaintext. Explicit env
+  // flag rather than sniffing the hostname — sniffing "not localhost" would
+  // silently break any future non-Railway managed DB with a real CA cert.
+  pgSsl: Boolean(process.env.PGSSL),
 
   secrets: {
     // Read lazily (via getters) so importing config doesn't throw before
@@ -52,6 +59,12 @@ export const config = {
   // deploys both behind one origin, rather than relying on relative-path
   // resolution to happen to be correct.
   webAppUrl: process.env.WEB_APP_URL ?? "http://localhost:5173",
+
+  // API listen port. Railway (and most PaaS) injects PORT and expects the
+  // process to bind it; API_PORT is the pre-Phase-4 local-dev name and stays
+  // as a fallback so existing .env files keep working. 3001 is the final
+  // fallback for a bare `npm run api` with neither set.
+  apiPort: Number(process.env.PORT ?? process.env.API_PORT ?? 3001),
 
   extraction: {
     // Caption-sufficiency gate (Spec 2 §2.3a, A2-7). Minimum distinct
@@ -146,8 +159,21 @@ export const config = {
     // How often the worker sweeps for stale locks.
     staleSweepIntervalMs: 30_000,
     // Awaiting-review → Expired TTL (Spec 4 A4-6, recommended 14 days).
-    // Column/relation defined now; enforcement lands with the API slice.
     reviewExpiryDays: 14,
+    // How often the worker sweeps awaiting_review jobs past reviewExpiryDays.
+    // Piggybacks on the same cadence as the stale-lock sweep — no need for a
+    // tighter interval on a days-scale TTL.
+    reviewExpirySweepIntervalMs: 30_000,
+  },
+
+  // Disk-level temp-media cleanup (Spec 4 §2.7 worker volume TTL sweep). The
+  // per-job pipeline already deletes its own temp dir in a try/finally
+  // (pipeline/extract/index.ts) — this is a periodic safety-net sweep for
+  // anything a hard crash (kill -9, OOM) left behind before that finally
+  // could run, so the worker volume doesn't grow unbounded over many restarts.
+  tempMedia: {
+    ttlHours: 6,
+    sweepIntervalMs: 30 * 60_000,
   },
 
   matching: {

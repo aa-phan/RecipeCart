@@ -174,7 +174,15 @@ let pool: pg.Pool | undefined;
  * open a connection before one is needed (e.g. `recipecart --help`). */
 export function getDb(): Kysely<DB> {
   if (instance) return instance;
-  pool = new pg.Pool({ connectionString: config.databaseUrl });
+  pool = new pg.Pool({
+    connectionString: config.databaseUrl,
+    // Managed Postgres (Railway) requires TLS but presents a cert not
+    // chained to a public CA — `rejectUnauthorized: false` still encrypts
+    // the connection, it just doesn't verify the cert chain. Opt-in via
+    // config.pgSsl (PGSSL env var) so local dev/test against a plaintext
+    // Postgres is unaffected.
+    ssl: config.pgSsl ? { rejectUnauthorized: false } : undefined,
+  });
   instance = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
   return instance;
 }

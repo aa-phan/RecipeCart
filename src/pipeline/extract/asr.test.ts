@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("../../platform/config.js", () => ({
-  config: { extraction: { whisperModel: "fake/whisper-model" } },
+  config: { extraction: { whisperModel: "fake/whisper-model" }, dataDir: "/fake/data" },
 }));
 
 /** Builds a minimal valid 16-bit PCM mono WAV file buffer from raw int16
@@ -59,7 +59,9 @@ describe("transcribeAudio", () => {
   it("loads the configured multilingual whisper model", async () => {
     transcribeMock.mockResolvedValue({ text: "", chunks: [] });
     await transcribeAudio("/tmp/audio.wav");
-    expect(pipelineMock).toHaveBeenCalledWith("automatic-speech-recognition", "fake/whisper-model");
+    expect(pipelineMock).toHaveBeenCalledWith("automatic-speech-recognition", "fake/whisper-model", {
+      cache_dir: "/fake/data",
+    });
   });
 
   it("maps timestamped chunks to AsrSegment[], trimming text", async () => {
