@@ -12,6 +12,7 @@ import {
   type KrogerLocationSearchResponse,
   type KrogerProductSearchResponse,
 } from "./types.js";
+import { assertUnderLimit, recordCall } from "./rate_limit.js";
 
 async function get<T>(path: string, params: Record<string, string>, token: string): Promise<T> {
   const url = new URL(`${config.kroger.apiBaseUrl}${path}`);
@@ -35,11 +36,19 @@ export function searchProducts(
   appToken: string,
   limit = 10,
 ): Promise<KrogerProductSearchResponse> {
+  // Rate-limit guard (Spec 3 §17): refuse to start once today's usage nears
+  // the documented daily ceiling, rather than tripping Kroger's hard limit
+  // mid-run. assertUnderLimit throws BEFORE any network call; recordCall
+  // only counts calls actually made.
+  assertUnderLimit("products");
   return get<KrogerProductSearchResponse>(
     "/products",
     { "filter.term": term, "filter.locationId": locationId, "filter.limit": String(limit) },
     appToken,
-  );
+  ).then((result) => {
+    recordCall("products");
+    return result;
+  });
 }
 
 /** Locations API (Spec 3 §14 store lookup). No per-user auth. */
@@ -49,6 +58,7 @@ export function searchLocations(
   radiusMiles = 25,
   limit = 5,
 ): Promise<KrogerLocationSearchResponse> {
+  assertUnderLimit("locations");
   return get<KrogerLocationSearchResponse>(
     "/locations",
     {
@@ -57,7 +67,10 @@ export function searchLocations(
       "filter.limit": String(limit),
     },
     appToken,
-  );
+  ).then((result) => {
+    recordCall("locations");
+    return result;
+  });
 }
 
 export type AddToCartResult = { ok: true } | { ok: false; status: number; reason: unknown };
@@ -71,6 +84,7 @@ export async function addToCart(
   quantity: number,
   userAccessToken: string,
 ): Promise<AddToCartResult> {
+  assertUnderLimit("cart");
   const response = await fetch(`${config.kroger.apiBaseUrl}/cart/add`, {
     method: "PUT",
     headers: {
@@ -79,6 +93,9 @@ export async function addToCart(
     },
     body: JSON.stringify({ items: [{ upc, quantity }] }),
   });
+  // Count the call whether Kroger accepted or rejected it — either way it
+  // consumed one against the documented daily cart-add ceiling.
+  recordCall("cart");
 
   if (response.status === 204) {
     return { ok: true };

@@ -71,6 +71,16 @@ function makeFakeDb() {
           },
         };
       }
+      if (sql.includes("UPDATE")) {
+        return {
+          run(status: string, resultsJson: string, id: string) {
+            const row = fakeCartRuns.find((r) => r.id === id);
+            if (!row) throw new Error(`UPDATE on unknown cart_runs id: ${id}`);
+            row.status = status;
+            row.results_json = resultsJson;
+          },
+        };
+      }
       throw new Error(`Unexpected SQL in fake db: ${sql}`);
     },
   };
@@ -397,6 +407,183 @@ describe("runCartApproval", () => {
     const result = await runCartApproval("recipe-1", [], "idem-key-9");
     expect(result.status).toBe("failed");
     expect(addToCartMock).not.toHaveBeenCalled();
+  });
+
+  describe("resume (Spec 3 §2.3 point 5)", () => {
+    it("a completed run still replays idempotently, not resumed", async () => {
+      addToCartMock.mockResolvedValue({ ok: true });
+      const first = await runCartApproval(
+        "recipe-1",
+        [{ upc: "111", quantity: 1 }],
+        "idem-key-resume-0",
+      );
+      expect(first.status).toBe("completed");
+      addToCartMock.mockClear();
+
+      const second = await runCartApproval(
+        "recipe-1",
+        [{ upc: "111", quantity: 1 }],
+        "idem-key-resume-0",
+      );
+      expect(second).toEqual(first);
+      expect(addToCartMock).not.toHaveBeenCalled();
+    });
+
+    it("retries only the not-yet-added items, never re-adding an already-added one", async () => {
+      // First run: item 1 succeeds, item 2 hits a 401 mid-run and stops.
+      addToCartMock
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce({ ok: false, status: 401, reason: { error: "invalid_token" } });
+
+      const first = await runCartApproval(
+        "recipe-1",
+        [
+          { upc: "111", quantity: 1, ingredientId: "ing-1" },
+          { upc: "222", quantity: 1, ingredientId: "ing-2" },
+        ],
+        "idem-key-resume-1",
+      );
+      expect(first.status).toBe("requires_user_intervention");
+      expect(fakeCartRuns).toHaveLength(1);
+      const rowId = fakeCartRuns[0]!.id;
+
+      // Second call with the SAME idempotency key, after re-auth: item 2
+      // should be the only one retried.
+      addToCartMock.mockClear();
+      addToCartMock.mockResolvedValue({ ok: true });
+
+      const second = await runCartApproval(
+        "recipe-1",
+        [
+          { upc: "111", quantity: 1, ingredientId: "ing-1" },
+          { upc: "222", quantity: 1, ingredientId: "ing-2" },
+        ],
+        "idem-key-resume-1",
+      );
+
+      expect(addToCartMock).toHaveBeenCalledTimes(1); // only item 2 retried
+      expect(addToCartMock).toHaveBeenCalledWith("222", 1, "valid-access-token");
+      expect(second.status).toBe("completed");
+      expect(second.results).toEqual(
+        expect.arrayContaining([
+          { ingredientId: "ing-1", upc: "111", status: "added" },
+          { ingredientId: "ing-2", upc: "222", status: "added" },
+        ]),
+      );
+      // Same row updated in place, not a new one inserted.
+      expect(fakeCartRuns).toHaveLength(1);
+      expect(fakeCartRuns[0]!.id).toBe(rowId);
+    });
+
+    it("recognizes an already-added item even when the added upc was a fallback, not item.upc", async () => {
+      // First run: the top pick is rejected, its fallback succeeds; a second
+      // item then hits a 401 and stops the run.
+      addToCartMock
+        .mockResolvedValueOnce({ ok: false, status: 404, reason: { error: "not_found" } })
+        .mockResolvedValueOnce({ ok: true }) // fallback succeeds
+        .mockResolvedValueOnce({ ok: false, status: 401, reason: { error: "invalid_token" } });
+
+      const items = [
+        {
+          upc: "top",
+          quantity: 1,
+          ingredientId: "ing-1",
+          fallbacks: [{ upc: "fallback", quantity: 1 }],
+        },
+        { upc: "222", quantity: 1, ingredientId: "ing-2" },
+      ];
+
+      const first = await runCartApproval("recipe-1", items, "idem-key-resume-2");
+      expect(first.status).toBe("requires_user_intervention");
+      expect(first.results).toEqual([
+        {
+          ingredientId: "ing-1",
+          upc: "fallback",
+          status: "added",
+          reason: expect.stringContaining("fallback candidate used"),
+        },
+      ]);
+
+      addToCartMock.mockClear();
+      addToCartMock.mockResolvedValue({ ok: true });
+
+      const second = await runCartApproval("recipe-1", items, "idem-key-resume-2");
+
+      // Only ing-2 (222) is retried — ing-1's item is recognized as already
+      // added via its fallback upc, not re-sent even though item.upc is
+      // "top", not "fallback".
+      expect(addToCartMock).toHaveBeenCalledTimes(1);
+      expect(addToCartMock).toHaveBeenCalledWith("222", 1, "valid-access-token");
+      expect(second.status).toBe("completed");
+    });
+
+    it("nothing left to retry (everything already added) recomputes status without calling addToCart", async () => {
+      addToCartMock.mockResolvedValueOnce({ ok: true });
+      // Force a requires_user_intervention terminal state artificially by
+      // stopping mid-run on a single-item list won't work (single success ->
+      // completed) — instead simulate via two items where the run records
+      // one added item then hits auth failure with nothing further approved
+      // on resume.
+      addToCartMock.mockReset();
+      addToCartMock
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce({ ok: false, status: 401, reason: { error: "invalid_token" } });
+
+      const first = await runCartApproval(
+        "recipe-1",
+        [
+          { upc: "111", quantity: 1, ingredientId: "ing-1" },
+          { upc: "222", quantity: 1, ingredientId: "ing-2" },
+        ],
+        "idem-key-resume-3",
+      );
+      expect(first.status).toBe("requires_user_intervention");
+
+      addToCartMock.mockClear();
+
+      // Resume, but only re-approve the already-added item — nothing remains.
+      const second = await runCartApproval(
+        "recipe-1",
+        [{ upc: "111", quantity: 1, ingredientId: "ing-1" }],
+        "idem-key-resume-3",
+      );
+
+      expect(addToCartMock).not.toHaveBeenCalled();
+      expect(second.status).toBe("completed");
+      expect(second.results).toEqual([{ ingredientId: "ing-1", upc: "111", status: "added" }]);
+    });
+
+    it("still not connected on resume -> stays requires_user_intervention, preserving prior added items", async () => {
+      addToCartMock
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce({ ok: false, status: 401, reason: { error: "invalid_token" } });
+
+      const first = await runCartApproval(
+        "recipe-1",
+        [
+          { upc: "111", quantity: 1, ingredientId: "ing-1" },
+          { upc: "222", quantity: 1, ingredientId: "ing-2" },
+        ],
+        "idem-key-resume-4",
+      );
+      expect(first.status).toBe("requires_user_intervention");
+
+      loadTokenMock.mockReturnValue(null); // still not (re-)connected
+      addToCartMock.mockClear();
+
+      const second = await runCartApproval(
+        "recipe-1",
+        [
+          { upc: "111", quantity: 1, ingredientId: "ing-1" },
+          { upc: "222", quantity: 1, ingredientId: "ing-2" },
+        ],
+        "idem-key-resume-4",
+      );
+
+      expect(second.status).toBe("requires_user_intervention");
+      expect(second.results).toEqual([{ ingredientId: "ing-1", upc: "111", status: "added" }]);
+      expect(addToCartMock).not.toHaveBeenCalled();
+    });
   });
 });
 

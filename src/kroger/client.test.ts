@@ -6,6 +6,15 @@ vi.mock("../platform/config.js", () => ({
   },
 }));
 
+// client.ts's rate-limit guard (assertUnderLimit/recordCall) hits the real
+// db.ts otherwise — this file doesn't test rate-limit tracking itself
+// (that's rate_limit.test.ts), just client.ts's HTTP-call shape, so the
+// guard is stubbed to a no-op here.
+vi.mock("./rate_limit.js", () => ({
+  assertUnderLimit: vi.fn(),
+  recordCall: vi.fn(),
+}));
+
 const { searchProducts, searchLocations, addToCart } = await import("./client.js");
 const { KrogerApiError } = await import("./types.js");
 

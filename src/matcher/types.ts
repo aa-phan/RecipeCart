@@ -27,4 +27,14 @@ export interface IngredientMatch {
   requiresApproval: boolean;
   approvalReason?: string;
   deprioritized: boolean; // pantry staple — display default, not a matching shortcut
+  // Set ONLY at the two materiality-governed substitution flag sites in
+  // matchIngredient (a broadened-search pick, or a close-match ambiguity),
+  // carrying the winning candidate's identity so the recipe-level
+  // materiality pass (materiality.ts) can judge safe-vs-material without
+  // string-parsing approvalReason. Deliberately NOT set for non-materiality
+  // flags (name-uncertain, no candidates, quantity-not-covered) — those stay
+  // flagged regardless of any Claude judgment. Also NOT set when the
+  // ingredient name itself is uncertain from extraction (nameUncertain),
+  // since that flag must survive independently of the substitution verdict.
+  substitutionCase?: { name: string; brand: string | null; size: string | null };
 }

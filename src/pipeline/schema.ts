@@ -10,18 +10,46 @@ import { z } from "zod";
 
 export const SCHEMA_VERSION = "2026-07-schema-v1";
 
+export const SOURCE_TYPES = ["asr", "ocr", "caption"] as const;
+
 export const EvidenceRefSchema = z.object({
   // "ocr" means text legible in a frame (tesseract output, or Claude reading
   // on-screen text/graphics directly from an escalation frame image) — NOT
   // general visual recognition of food/objects in a frame with no
   // accompanying text. See spec-2-tiktok-extraction.md §2.5b.
-  source_type: z.enum(["asr", "ocr", "caption"]),
+  source_type: z.enum(SOURCE_TYPES),
   timestamp: z.number().nonnegative().optional(),
   frame_ref: z.string().optional(),
   // The matched segment +/- 1 segment, capped ~200 chars (A2-5).
   snippet: z.string().max(200).optional(),
 });
 export type EvidenceRef = z.infer<typeof EvidenceRefSchema>;
+
+// Per-field confidence band (Spec 2 §2 P2 / A2-4): high >=0.85, medium
+// 0.5-0.85, low <0.5. Emitted as a band label, not a raw score — the bands
+// only need to be consistent, not numerically precise (A2-4), and a label is
+// cheaper in output tokens than a float + keeps the model from over-anchoring
+// on spurious precision.
+export const ConfidenceBandSchema = z.enum(["high", "medium", "low"]);
+export type ConfidenceBand = z.infer<typeof ConfidenceBandSchema>;
+
+// Structural record of an evidence-source conflict (Spec 2 §2.5 conflict
+// rule): when two sources disagreed on the same field, the winning value is
+// resolved per priority (ocr > caption > asr) and kept as the field's value,
+// while the discarded alternative(s) are retained here rather than silently
+// dropped — "all retained" per the spec, so the resolution is auditable.
+export const ConflictRecordSchema = z.object({
+  resolved_source: z.enum(SOURCE_TYPES),
+  alternatives: z
+    .array(
+      z.object({
+        source_type: z.enum(SOURCE_TYPES),
+        value: z.string(),
+      }),
+    )
+    .min(1),
+});
+export type ConflictRecord = z.infer<typeof ConflictRecordSchema>;
 
 // A field that is either populated WITH evidence, or explicitly null WITH a
 // stated reason — never populated with no evidence, and never silently
@@ -33,6 +61,11 @@ function evidencedField<T extends z.ZodTypeAny>(valueSchema: T) {
       value: valueSchema.nullable(),
       evidence: z.array(EvidenceRefSchema).optional(),
       null_reason: z.string().optional(),
+      // Optional per-field confidence band (A2-4) and conflict record — both
+      // additive and optional so recipes persisted before Phase 2 still
+      // validate. Present on non-null fields the model was asked to grade.
+      confidence: ConfidenceBandSchema.optional(),
+      conflict: ConflictRecordSchema.optional(),
     })
     .superRefine((field, ctx) => {
       if (field.value !== null) {

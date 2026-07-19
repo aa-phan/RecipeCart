@@ -9,6 +9,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "../../platform/config.js";
 import { logger } from "../../platform/logger.js";
+import { retryWithBackoff } from "../../platform/retry.js";
+import { ExtractionError, classifyDownloadFailure, userFacingReasonFor } from "./failures.js";
 import type { JobContext } from "./types.js";
 
 export class DownloadTimeoutError extends Error {}
@@ -20,6 +22,19 @@ export class DownloadFailedError extends Error {
     super(message);
     this.name = "DownloadFailedError";
   }
+}
+
+// A yt-dlp failure is worth retrying only when it looks transient: a timeout,
+// or a non-zero exit whose stderr doesn't name a permanent condition
+// (private/deleted/region — classifyDownloadFailure). A permanent condition,
+// or any other error (e.g. yt-dlp not installed → spawn ENOENT), is not
+// retried.
+function isRetryableDownloadError(err: unknown): boolean {
+  if (err instanceof DownloadTimeoutError) return true;
+  if (err instanceof DownloadFailedError) {
+    return classifyDownloadFailure(err.stderr) === "download_failed_transient";
+  }
+  return false;
 }
 
 /** Subset of yt-dlp's --write-info-json output this pipeline actually uses.
@@ -47,7 +62,34 @@ export interface DownloadResult {
 export async function download(ctx: JobContext): Promise<DownloadResult> {
   const outTemplate = path.join(ctx.jobDir, "media.%(ext)s");
 
-  await runYtDlp(["-o", outTemplate, "--write-info-json", "--no-playlist", ctx.sourceUrl]);
+  // Transient network/timeout failures retry ×2 with backoff (Spec 2 §2.2);
+  // a permanent condition (private/deleted/region) is not retried. After the
+  // retries, map the failure to its terminal ExtractionError class so the
+  // caller can render a specific failure card and record the class.
+  try {
+    await retryWithBackoff(
+      () => runYtDlp(["-o", outTemplate, "--write-info-json", "--no-playlist", ctx.sourceUrl]),
+      {
+        attempts: 2,
+        baseDelayMs: 1000,
+        isRetryable: isRetryableDownloadError,
+        label: "yt-dlp download",
+      },
+    );
+  } catch (err) {
+    if (err instanceof DownloadFailedError) {
+      const cls = classifyDownloadFailure(err.stderr);
+      throw new ExtractionError(cls, userFacingReasonFor(cls), err);
+    }
+    if (err instanceof DownloadTimeoutError) {
+      throw new ExtractionError(
+        "download_failed_transient",
+        userFacingReasonFor("download_failed_transient"),
+        err,
+      );
+    }
+    throw err; // e.g. yt-dlp not installed (spawn ENOENT) — an environment error, surfaced as-is.
+  }
 
   const files = fs.readdirSync(ctx.jobDir);
   const infoFile = files.find((f) => f.endsWith(".info.json"));

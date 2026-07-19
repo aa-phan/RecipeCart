@@ -19,6 +19,7 @@ import { saveToken, loadToken, isExpiredOrMissing } from "./kroger/token_store.j
 import { saveStoreLocation, loadStoreLocation } from "./kroger/store_config.js";
 import { runCartApproval, type ApprovedCartItem } from "./kroger/cart_runner.js";
 import { extract } from "./pipeline/extract/index.js";
+import { ExtractionError } from "./pipeline/extract/failures.js";
 import type { Recipe } from "./pipeline/schema.js";
 import { matchRecipeAndPersist, renderMatchesTable } from "./matcher/index.js";
 import type { ProductCandidate } from "./matcher/types.js";
@@ -282,10 +283,21 @@ program
         );
       }
 
-      const matches = await matchRecipeAndPersist(recipeId, store.locationId);
+      // --mock skips the materiality Claude call too, so a mock run makes no
+      // Anthropic calls at all (parallels the reconcile mock above).
+      const matches = await matchRecipeAndPersist(recipeId, store.locationId, {
+        skipMateriality: cmdOptions.mock,
+      });
       console.log("\n" + renderMatchesTable(matches));
       console.log(`\nRun \`recipecart approve ${recipeId}\` to add approved items to your cart.`);
     } catch (err) {
+      // A classified extraction failure (Spec 2 §3) renders as a specific
+      // failure card rather than a generic stack-trace log.
+      if (err instanceof ExtractionError) {
+        console.error(`\nExtraction failed [${err.failureClass}]: ${err.userFacingReason}`);
+        process.exitCode = 1;
+        return;
+      }
       logger.error("Extraction/matching failed", {
         tiktokUrl,
         error: err instanceof Error ? err.message : String(err),

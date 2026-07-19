@@ -70,9 +70,44 @@ function migrate(database: DatabaseSync): void {
       completed_at TEXT
     );
 
+    -- Phase 2 (Spec 3 §17): lightweight daily API-usage counters for
+    -- rate-limit tracking against Kroger's documented ceilings. One row per
+    -- (UTC day, endpoint); the cart runner / matcher back off well before the
+    -- documented daily limits at single-user volume.
+    CREATE TABLE IF NOT EXISTS kroger_api_usage (
+      day TEXT NOT NULL,       -- UTC date, YYYY-MM-DD
+      endpoint TEXT NOT NULL,  -- 'products' | 'locations' | 'cart'
+      count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, endpoint)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_ingredients_recipe_id ON ingredients(recipe_id);
     CREATE INDEX IF NOT EXISTS idx_cart_runs_recipe_id ON cart_runs(recipe_id);
   `);
+
+  // Phase 2 (Spec 2 §3): failure classification columns on recipes. Added via
+  // guarded ALTER (not the CREATE TABLE above) so an already-created recipes
+  // table in an existing local DB picks them up too — CREATE TABLE IF NOT
+  // EXISTS never adds columns to a table that already exists.
+  addColumnIfMissing(database, "recipes", "failure_class", "TEXT");
+  addColumnIfMissing(database, "recipes", "failure_reason", "TEXT");
+}
+
+interface TableColumnRow {
+  name: string;
+}
+
+/** Idempotently add a column to an existing table. node:sqlite has no
+ * `ADD COLUMN IF NOT EXISTS`, so check PRAGMA table_info first. */
+function addColumnIfMissing(
+  database: DatabaseSync,
+  table: string,
+  column: string,
+  type: string,
+): void {
+  const cols = database.prepare(`PRAGMA table_info(${table})`).all() as unknown as TableColumnRow[];
+  if (cols.some((c) => c.name === column)) return;
+  database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type};`);
 }
 
 export function tempDirFor(jobId: string): string {
