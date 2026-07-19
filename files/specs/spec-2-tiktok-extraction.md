@@ -62,10 +62,11 @@ Reuses the same ingredient-likelihood scorer as escalation selection (§2.4: qua
 ### 2.3b OCR chrome masking `[P1]`, tuned `[P2]`
 TikTok UI chrome occupies predictable regions (right-edge icon column, bottom caption/username band). Text blocks whose bounding boxes fall in these regions are down-weighted/tagged `chrome`, not deleted — this is the primary mechanism for separating creator overlay text from interface text. Region definitions are config, not code. Only relevant when `caption_sufficient` is false and OCR actually runs.
 
-### 2.4 Escalation selection `[P2]` (P1 can send the top-N frames by simple OCR-confidence heuristic)
+### 2.4 Escalation selection `[P2]` (P1 can send the top-N frames by simple OCR-confidence heuristic) — implemented; deeper investment reclassified as future expansion (2026-07-19)
 - Score = ingredient-likelihood of OCR text (quantity/unit/food-noun patterns) × inverse OCR confidence (low confidence on likely-ingredient text is exactly what needs vision) + bonus for early-video frames.
 - Hard cap **8 frames/job**; always include at least one early frame (title/ingredient-card heuristic).
 - Scene-change threshold and interval are config values (`extraction.scene_threshold`, `extraction.frame_interval_s`), not constants.
+- **Status:** this scoring model is built and live-verified (`escalate_select.ts`). Further hardening of the OCR/vision-escalation path *beyond* what's here — and photo-mode support specifically (§7 B2-2) — is deferred, not because it's broken but because most real recipe TikToks put the full ingredient list in the caption, which the `caption_sufficient` gate (§2.3a) already handles at zero vision cost. Treat "caption-sufficient" as the primary supported input shape for now; revisit this path once real usage shows caption-insufficient volume actually matters.
 
 ### 2.5 Claude reconciliation call `[P1]`, tightened `[P2]`
 - **Model:** Claude Sonnet 5 (`claude-sonnet-5`). Haiku 4.5 evaluation is post-MVP once real data exists.
@@ -231,7 +232,7 @@ Emitted events (worker-mode, `[P3]`): `recipe.extraction.requested` / `.complete
 ## 7. Blockers
 
 - **B2-1 — yt-dlp viability against current TikTok.** The whole component depends on it. Resolved by the Phase 0 spike; if it fails, fallback conversation needed (browser-automation download, or manual transcript-paste input as the PRD's post-MVP idea pulled forward).
-- **B2-2 — Photo-mode post support in yt-dlp.** Slideshow posts are in scope with a reduced pipeline; confirm yt-dlp actually retrieves the images. Also P0.
+- **B2-2 — Photo-mode post support in yt-dlp. CONFIRMED GAP, reclassified non-blocking future expansion (2026-07-19).** yt-dlp cannot retrieve TikTok slideshow images beyond a single cover thumbnail (`spike-notes.md`) — the real slide URLs sit behind TikTok's anti-bot page, requiring a Playwright-rendered session to reach, i.e. reintroducing the exact browser-automation dependency the Kroger pivot deliberately eliminated. That's a product/architecture decision, not a code fix — don't build it without an explicit conversation first. Photo-mode posts are out of scope for the MVP; the pipeline is built and tested against caption-sufficient standard-video posts, which cover the common real-world case.
 - ~~B2-3 — ASR/OCR vendor accounts + keys.~~ **Obsolete** — both run locally now (A2-1/A2-2), no vendor account or key needed for either.
 - **B2-4 — Anthropic API key with billing.** Gates P1.
 
