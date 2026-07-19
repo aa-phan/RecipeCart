@@ -32,6 +32,68 @@
   opacity: 0.6;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.recipes-list__submit {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.recipes-list__submit input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.recipes-list__submit button {
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.recipes-list__submit button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.recipes-list__submit-note {
+  color: #1a5c1a;
+  background: #eaf7ea;
+  border: 1px solid #c2e8c2;
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
+.recipes-list__submit-error {
+  color: #8a1f11;
+  background: #fdecea;
+  border: 1px solid #f5c2bc;
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
 .recipes-list__loading,
 .recipes-list__empty {
   color: #555;

@@ -44,6 +44,15 @@ export const config = {
 
   krogerRedirectUri: process.env.KROGER_REDIRECT_URI ?? "http://localhost:3000/callback",
 
+  // Where to send the browser after the Kroger OAuth callback finishes
+  // (src/api/routes/kroger_auth.ts). A RELATIVE redirect would resolve
+  // against the API server's own origin, which is wrong whenever the web
+  // app is served from a different origin — true for local dev (Vite on
+  // :5173, API on :3001) and worth keeping explicit even once Phase 4
+  // deploys both behind one origin, rather than relying on relative-path
+  // resolution to happen to be correct.
+  webAppUrl: process.env.WEB_APP_URL ?? "http://localhost:5173",
+
   extraction: {
     // Caption-sufficiency gate (Spec 2 §2.3a, A2-7). Minimum distinct
     // ingredient-pattern lines in the caption before we skip frame

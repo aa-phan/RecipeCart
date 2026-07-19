@@ -45,7 +45,7 @@ describe("kroger auth routes", () => {
 
     expect(res.statusCode).toBeGreaterThanOrEqual(300);
     expect(res.statusCode).toBeLessThan(400);
-    expect(res.headers.location).toBe("/?krogerConnected=true");
+    expect(res.headers.location).toBe("http://localhost:5173/?krogerConnected=true");
     expect(exchangeCode).toHaveBeenCalledWith("auth-code-123");
 
     const row = await getDb()

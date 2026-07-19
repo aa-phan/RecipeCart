@@ -14,6 +14,7 @@ import type { FastifyInstance } from "fastify";
 import { buildAuthUrl, randomState, exchangeCode } from "../../kroger/auth.js";
 import { saveToken } from "../../kroger/token_store.js";
 import { badRequest } from "../lib/errors.js";
+import { config } from "../../platform/config.js";
 
 // CSRF `state` bookkeeping. A browser-redirect OAuth flow is stateless
 // across the round trip (the browser leaves and comes back later), so we
@@ -65,6 +66,9 @@ export default async function krogerAuthRoutes(app: FastifyInstance): Promise<vo
       expiresAt: Date.now() + token.expires_in * 1000,
     });
 
-    return reply.redirect("/?krogerConnected=true");
+    // MUST be absolute: a relative path would resolve against this API
+    // server's own origin, not the (possibly different-origin, e.g. local
+    // dev's Vite server) web app — see config.webAppUrl's doc comment.
+    return reply.redirect(`${config.webAppUrl}/?krogerConnected=true`);
   });
 }
