@@ -18,6 +18,7 @@ import {
   type QuantityFit,
 } from "./rank.js";
 import { isSeasoning } from "./seasonings.js";
+import { judgeMateriality, type MaterialityCase } from "./materiality.js";
 import type { IngredientMatch, ProductCandidate } from "./types.js";
 
 export type { IngredientMatch, ProductCandidate } from "./types.js";
@@ -489,6 +490,14 @@ export async function matchIngredient(
 
   let requiresApproval = false;
   let approvalReason: string | undefined;
+  // Set ONLY at the two materiality-governed sites below (a broadened-search
+  // pick, or a close-match ambiguity) — see IngredientMatch.substitutionCase's
+  // doc. The recipe-level materiality pass (matchRecipe/matchRecipeAndPersist)
+  // collects these across all ingredients and judges safe-vs-material in one
+  // batched Claude call; a "safe" verdict clears requiresApproval, a
+  // "material" verdict keeps it flagged with Claude's reason instead of this
+  // generic one.
+  let substitutionCase: IngredientMatch["substitutionCase"];
 
   if (candidates.length === 0) {
     requiresApproval = true;
@@ -504,6 +513,11 @@ export async function matchIngredient(
     if (scored[0]!.fromBroadenedSearch) {
       requiresApproval = true;
       approvalReason = `found via a broadened search ("${broadenedTermUsed}") rather than "${canonicalName}" directly — confirm "${candidates[0]!.name}" is an acceptable substitute before approving`;
+      substitutionCase = {
+        name: candidates[0]!.name,
+        brand: candidates[0]!.brand ?? null,
+        size: candidates[0]!.size ?? null,
+      };
     } else {
       candidates[0]!.reason = hasQuantity
         ? "small seasoning amount — cheapest well-matched product selected regardless of stated quantity"
@@ -534,12 +548,18 @@ export async function matchIngredient(
       // behavior of never finding it at all.
       requiresApproval = true;
       approvalReason = `found via a broadened search ("${broadenedTermUsed}") rather than "${canonicalName}" directly — confirm "${top.candidate.name}" is an acceptable substitute before approving`;
+      substitutionCase = {
+        name: top.candidate.name,
+        brand: top.candidate.brand ?? null,
+        size: top.candidate.size ?? null,
+      };
     }
   } else if (candidates.length >= 2) {
     const [top, second] = candidates;
     if (top!.rankScore - second!.rankScore < AMBIGUITY_MARGIN) {
       requiresApproval = true;
       approvalReason = "top candidates are closely matched; no single clearly-best product";
+      substitutionCase = { name: top!.name, brand: top!.brand ?? null, size: top!.size ?? null };
     }
   }
 
@@ -547,6 +567,11 @@ export async function matchIngredient(
     requiresApproval = true;
     const note = "ingredient name uncertain from extraction (matched on raw text)";
     approvalReason = approvalReason ? `${approvalReason}; ${note}` : note;
+    // The uncertainty is about the INGREDIENT NAME itself, not about whether
+    // a found product is a safe substitute for a known name — that's not a
+    // question materiality judgment can answer, so this flag must survive
+    // independently of any Claude verdict (see substitutionCase's doc).
+    substitutionCase = undefined;
   }
 
   return {
@@ -556,7 +581,57 @@ export async function matchIngredient(
     requiresApproval,
     approvalReason,
     deprioritized: ingredient.is_pantry_staple,
+    substitutionCase,
   };
+}
+
+export interface MatchOptions {
+  /** Skip the materiality Claude call entirely, leaving the deterministic
+   * substitution flags exactly as matchIngredient set them. Parallels
+   * reconcile's --mock passthrough — for zero-cost local testing of the rest
+   * of the pipeline. Real runs should NOT set this. */
+  skipMateriality?: boolean;
+}
+
+/** Recipe-level post-pass (Spec 3 §2.2 "Claude-delegated judgments"): collects
+ * every ingredient the deterministic matcher flagged as a substitution case
+ * (IngredientMatch.substitutionCase), judges them all in ONE batched Claude
+ * call (materiality.ts), and applies the verdicts in place — `material:
+ * false` clears requiresApproval with a "confirmed safe" reason, `material:
+ * true` keeps it flagged with Claude's own reason. Mutates `results` in
+ * place; also returns it for convenience. No-op (no API call) when nothing
+ * was flagged, or when `skipMateriality` is set. */
+async function applyMateriality(
+  results: IngredientMatch[],
+  options: MatchOptions,
+): Promise<IngredientMatch[]> {
+  if (options.skipMateriality) return results;
+
+  const cases: MaterialityCase[] = [];
+  for (const r of results) {
+    if (r.substitutionCase) {
+      cases.push({
+        ingredientId: r.ingredientId,
+        ingredientName: r.canonicalName,
+        candidate: r.substitutionCase,
+      });
+    }
+  }
+  if (cases.length === 0) return results;
+
+  const verdicts = await judgeMateriality(cases);
+  for (const r of results) {
+    const verdict = verdicts.get(r.ingredientId);
+    if (!verdict) continue;
+    if (verdict.material) {
+      r.requiresApproval = true;
+      r.approvalReason = verdict.reason;
+    } else {
+      r.requiresApproval = false;
+      r.approvalReason = `confirmed safe brand/size substitution: ${verdict.reason}`;
+    }
+  }
+  return results;
 }
 
 /** Main entry point (Spec 3 §2.2). Matches every ingredient in a recipe
@@ -564,10 +639,13 @@ export async function matchIngredient(
  * up front and reuses it across all ingredients in the run (tokens last 30
  * min, comfortably longer than a single recipe's worth of calls). Runs
  * sequentially — deliberately, to stay a polite, predictable citizen of
- * Kroger's documented rate limits rather than bursting requests. */
+ * Kroger's documented rate limits rather than bursting requests. After all
+ * ingredients are matched, runs the materiality post-pass (see
+ * applyMateriality) unless `options.skipMateriality`. */
 export async function matchRecipe(
   ingredients: Ingredient[],
   locationId: string,
+  options: MatchOptions = {},
 ): Promise<IngredientMatch[]> {
   const token = await getAppToken();
   const results: IngredientMatch[] = [];
@@ -576,7 +654,7 @@ export async function matchRecipe(
     const ingredientId = `ing-${i}`;
     results.push(await matchIngredient(ingredient, ingredientId, locationId, token.access_token));
   }
-  return results;
+  return applyMateriality(results, options);
 }
 
 interface IngredientRow {
@@ -609,6 +687,7 @@ function ingredientFromDbRow(row: IngredientRow): Ingredient {
 export async function matchRecipeAndPersist(
   recipeId: string,
   locationId: string,
+  options: MatchOptions = {},
 ): Promise<IngredientMatch[]> {
   const db = getDb();
   const rows = db
@@ -628,6 +707,12 @@ export async function matchRecipeAndPersist(
       token.access_token,
     );
     results.push(match);
+  }
+  // Materiality judgment runs AFTER every ingredient is matched (one batched
+  // call across the whole recipe) and BEFORE persisting, so the DB reflects
+  // the post-judgment state rather than the deterministic-only flags.
+  await applyMateriality(results, options);
+  for (const match of results) {
     persistMatch(match);
   }
   return results;

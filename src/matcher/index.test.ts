@@ -19,6 +19,17 @@ vi.mock("../platform/db.js", () => ({
   })),
 }));
 
+// Mocked so matchRecipe/matchRecipeAndPersist's WIRING to the materiality
+// pass can be tested (does it collect the right cases, apply verdicts
+// correctly) without exercising materiality.ts's own internals (covered by
+// materiality.test.ts) or making a real Anthropic call — config.js isn't
+// mocked in this file, so an unmocked materiality.ts would use the repo's
+// real .env API key.
+const judgeMaterialityMock = vi.fn();
+vi.mock("./materiality.js", () => ({
+  judgeMateriality: (...args: unknown[]) => judgeMaterialityMock(...args),
+}));
+
 const { getAppToken } = await import("../kroger/auth.js");
 const { searchProducts } = await import("../kroger/client.js");
 const { matchIngredient, matchRecipe, matchRecipeAndPersist, renderMatchesTable } =
@@ -64,6 +75,8 @@ beforeEach(() => {
   preparedRun.mockReset();
   preparedGet.mockReset();
   preparedAll.mockReset();
+  judgeMaterialityMock.mockReset();
+  judgeMaterialityMock.mockResolvedValue(new Map()); // default: no verdicts (as if 0 cases)
 });
 
 describe("matchIngredient", () => {
@@ -861,6 +874,179 @@ describe("matchRecipeAndPersist", () => {
     expect(results).toHaveLength(1);
     expect(results[0]!.ingredientId).toBe("ingredient-1");
     expect(preparedRun).toHaveBeenCalled(); // insert happened
+  });
+});
+
+describe("materiality wiring", () => {
+  // Same broadened-search fixture as the matchIngredient test above — the
+  // top pick only turns up via a broadened query, so matchIngredient sets
+  // substitutionCase and flags requiresApproval deterministically. These
+  // tests check that the recipe-level pass (a) collects exactly that case,
+  // (b) applies a returned verdict, overriding the deterministic flag either
+  // direction.
+  function mockBroadenedSearchIngredient() {
+    (searchProducts as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ data: [], meta: { pagination: { start: 0, limit: 10, total: 0 } } })
+      .mockResolvedValueOnce({
+        data: [
+          product({
+            productId: "alt",
+            upc: "alt",
+            description: "President Rondelé Creamy Whipped Garlic & Herbs Spreadable Cheese",
+            items: [
+              {
+                itemId: "1",
+                fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+                price: { regular: 5.99 },
+                size: "16 oz",
+                soldBy: "UNIT",
+              },
+            ],
+          }),
+        ],
+        meta: { pagination: { start: 0, limit: 10, total: 1 } },
+      } satisfies KrogerProductSearchResponse);
+  }
+
+  it("matchRecipe: collects flagged substitution cases and calls judgeMateriality once", async () => {
+    (getAppToken as ReturnType<typeof vi.fn>).mockResolvedValue({
+      access_token: "tok",
+      expires_in: 1800,
+      token_type: "bearer",
+    });
+    mockBroadenedSearchIngredient();
+    judgeMaterialityMock.mockResolvedValue(new Map());
+
+    const results = await matchRecipe(
+      [
+        ingredient({
+          canonical_name_en: { value: "cream cheese", evidence: [{ source_type: "caption" }] },
+          raw_text: "some cream cheese",
+          quantity: { value: null, unit: null, raw_text: "some" },
+        }),
+      ],
+      "01100002",
+    );
+
+    expect(results[0]!.requiresApproval).toBe(true); // still flagged: no verdict returned
+    expect(judgeMaterialityMock).toHaveBeenCalledTimes(1);
+    const [cases] = judgeMaterialityMock.mock.calls[0]!;
+    expect(cases).toEqual([
+      {
+        ingredientId: "ing-0",
+        ingredientName: "cream cheese",
+        candidate: expect.objectContaining({ name: expect.stringContaining("Rondelé") }),
+      },
+    ]);
+  });
+
+  it("matchRecipe: a safe verdict clears requiresApproval", async () => {
+    (getAppToken as ReturnType<typeof vi.fn>).mockResolvedValue({
+      access_token: "tok",
+      expires_in: 1800,
+      token_type: "bearer",
+    });
+    mockBroadenedSearchIngredient();
+    judgeMaterialityMock.mockResolvedValue(
+      new Map([["ing-0", { material: false, reason: "same cheese, different brand" }]]),
+    );
+
+    const results = await matchRecipe(
+      [
+        ingredient({
+          canonical_name_en: { value: "cream cheese", evidence: [{ source_type: "caption" }] },
+          raw_text: "some cream cheese",
+          quantity: { value: null, unit: null, raw_text: "some" },
+        }),
+      ],
+      "01100002",
+    );
+
+    expect(results[0]!.requiresApproval).toBe(false);
+    expect(results[0]!.approvalReason).toMatch(/confirmed safe/);
+  });
+
+  it("matchRecipe: a material verdict keeps requiresApproval with Claude's reason", async () => {
+    (getAppToken as ReturnType<typeof vi.fn>).mockResolvedValue({
+      access_token: "tok",
+      expires_in: 1800,
+      token_type: "bearer",
+    });
+    mockBroadenedSearchIngredient();
+    judgeMaterialityMock.mockResolvedValue(
+      new Map([["ing-0", { material: true, reason: "not actually cream cheese" }]]),
+    );
+
+    const results = await matchRecipe(
+      [
+        ingredient({
+          canonical_name_en: { value: "cream cheese", evidence: [{ source_type: "caption" }] },
+          raw_text: "some cream cheese",
+          quantity: { value: null, unit: null, raw_text: "some" },
+        }),
+      ],
+      "01100002",
+    );
+
+    expect(results[0]!.requiresApproval).toBe(true);
+    expect(results[0]!.approvalReason).toBe("not actually cream cheese");
+  });
+
+  it("matchRecipe: skipMateriality leaves the deterministic flag untouched and skips the call", async () => {
+    (getAppToken as ReturnType<typeof vi.fn>).mockResolvedValue({
+      access_token: "tok",
+      expires_in: 1800,
+      token_type: "bearer",
+    });
+    mockBroadenedSearchIngredient();
+
+    const results = await matchRecipe(
+      [
+        ingredient({
+          canonical_name_en: { value: "cream cheese", evidence: [{ source_type: "caption" }] },
+          raw_text: "some cream cheese",
+          quantity: { value: null, unit: null, raw_text: "some" },
+        }),
+      ],
+      "01100002",
+      { skipMateriality: true },
+    );
+
+    expect(results[0]!.requiresApproval).toBe(true);
+    expect(results[0]!.approvalReason).toMatch(/found via a broadened search/);
+    expect(judgeMaterialityMock).not.toHaveBeenCalled();
+  });
+
+  it("matchRecipeAndPersist: applies the verdict BEFORE persisting", async () => {
+    (getAppToken as ReturnType<typeof vi.fn>).mockResolvedValue({
+      access_token: "tok",
+      expires_in: 1800,
+      token_type: "bearer",
+    });
+    mockBroadenedSearchIngredient();
+    preparedAll.mockReturnValue([
+      {
+        id: "ingredient-1",
+        canonical_name: "cream cheese",
+        quantity_value: 1,
+        quantity_unit: "cup",
+        raw_text: "1 cup cream cheese",
+        is_pantry_staple: 0,
+      },
+    ]);
+    preparedGet.mockReturnValue(undefined);
+    judgeMaterialityMock.mockResolvedValue(
+      new Map([["ingredient-1", { material: false, reason: "same product" }]]),
+    );
+
+    const results = await matchRecipeAndPersist("recipe-1", "01100002");
+
+    expect(results[0]!.requiresApproval).toBe(false);
+    // The INSERT/UPDATE call's requires_approval arg (persistMatch's 4th
+    // bound param for an INSERT) must reflect the post-verdict value, 0/false.
+    expect(preparedRun).toHaveBeenCalled();
+    const insertArgs = preparedRun.mock.calls[0]!;
+    expect(insertArgs).toContain(0); // requires_approval bound as 0 (cleared)
   });
 });
 
