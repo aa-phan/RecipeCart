@@ -149,6 +149,30 @@ function persistCartRun(
   ).run(jobId, recipeId, idempotencyKey, status, JSON.stringify(results));
 }
 
+/** Updates an EXISTING cart_runs row in place (Spec 3 §2.3 point 5: a
+ * requires_user_intervention run is resumable, re-attempting only remaining
+ * items — see resumeCartRun). Never inserts a new row; the run keeps its
+ * original id/idempotency_key throughout its resume history. */
+function updateCartRun(jobId: string, status: CartRunStatus, results: CartItemResult[]): void {
+  const db = getDb();
+  db.prepare(
+    `UPDATE cart_runs SET status = ?, results_json = ?, completed_at = datetime('now') WHERE id = ?`,
+  ).run(status, JSON.stringify(results), jobId);
+}
+
+/** An approved item counts as already-added if a stored `added` result
+ * matches it by ingredientId, by its own upc, OR by any of its fallback
+ * upcs — the upc that actually got added on a prior attempt may have been a
+ * fallback, not `item.upc`, so matching on upc alone would wrongly re-add it. */
+function isAlreadyAdded(item: ApprovedCartItem, addedResults: CartItemResult[]): boolean {
+  const candidateUpcs = new Set([item.upc, ...(item.fallbacks ?? []).map((f) => f.upc)]);
+  return addedResults.some(
+    (r) =>
+      (item.ingredientId !== undefined && r.ingredientId === item.ingredientId) ||
+      candidateUpcs.has(r.upc),
+  );
+}
+
 function summarize(status: CartRunStatus, results: CartItemResult[]): string {
   const added = results.filter((r) => r.status === "added").length;
   const needsAttention = results.filter((r) => r.status === "needs_attention").length;
@@ -273,6 +297,131 @@ async function addItemWithFallback(
   };
 }
 
+/** Sequential add with per-item transient retry + fallback (Spec 3 §2.3
+ * points 3-4), shared by both a fresh run and a resumed one. Stops
+ * immediately on auth_failure (401) without marking that item
+ * needs_attention — its state is genuinely unknown/unattempted-in-a-usable-
+ * way, driven by the connection, not the item. */
+async function processItems(
+  items: ApprovedCartItem[],
+  accessToken: string,
+  recipeId: string,
+  jobId: string,
+): Promise<{ results: CartItemResult[]; authFailure: boolean }> {
+  const results: CartItemResult[] = [];
+  let authFailure = false;
+
+  for (const item of items) {
+    const outcome = await addItemWithFallback(item, accessToken);
+
+    if (outcome.outcome === "added") {
+      results.push({
+        ingredientId: item.ingredientId,
+        upc: outcome.upc,
+        status: "added",
+        ...(outcome.usedFallback
+          ? { reason: `fallback candidate used — original pick (${item.upc}) was rejected` }
+          : {}),
+      });
+      continue;
+    }
+
+    if (outcome.outcome === "auth_failure") {
+      logger.warn("cart_runner: token invalid mid-run, stopping", {
+        recipeId,
+        jobId,
+        upc: item.upc,
+      });
+      authFailure = true;
+      break;
+    }
+
+    results.push({
+      ingredientId: item.ingredientId,
+      upc: item.upc,
+      status: "needs_attention",
+      reason: outcome.reason,
+    });
+  }
+
+  return { results, authFailure };
+}
+
+/** Resumes a run stuck in `requires_user_intervention` (Spec 3 §2.3 point 5:
+ * "re-attempts only remaining items"). Re-attempts ONLY the approved items
+ * not already `added` in the stored result (matched by ingredientId, upc, or
+ * any fallback upc — see isAlreadyAdded), with a freshly-ensured token, and
+ * merges the new outcomes with the previously-added ones — never re-sending
+ * an item that already succeeded. Updates the SAME cart_runs row in place
+ * (same jobId/idempotency_key throughout the run's resume history). */
+async function resumeCartRun(
+  recipeId: string,
+  jobId: string,
+  approvedItems: ApprovedCartItem[],
+  storedResults: CartItemResult[],
+): Promise<CartRunResult> {
+  const alreadyAdded = storedResults.filter((r) => r.status === "added");
+  const remaining = approvedItems.filter((item) => !isAlreadyAdded(item, alreadyAdded));
+
+  logger.info("cart_runner: resuming requires_user_intervention run", {
+    recipeId,
+    jobId,
+    alreadyAddedCount: alreadyAdded.length,
+    remainingCount: remaining.length,
+  });
+
+  if (remaining.length === 0) {
+    // Nothing left to retry — every approved item was already added on a
+    // prior attempt. Recompute the terminal status from what's actually
+    // there rather than leaving it stuck at requires_user_intervention.
+    const status = terminalStatusFor(alreadyAdded);
+    updateCartRun(jobId, status, alreadyAdded);
+    return { jobId, status, results: alreadyAdded, summary: summarize(status, alreadyAdded) };
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await ensureValidUserToken();
+  } catch (err) {
+    // Still not connected — the row stays requires_user_intervention with
+    // exactly what it had before (nothing new attempted).
+    logger.warn("cart_runner: resume still has no valid token", {
+      recipeId,
+      jobId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    updateCartRun(jobId, "requires_user_intervention", alreadyAdded);
+    return {
+      jobId,
+      status: "requires_user_intervention",
+      results: alreadyAdded,
+      summary: summarize("requires_user_intervention", alreadyAdded),
+    };
+  }
+
+  const { results: newResults, authFailure } = await processItems(
+    remaining,
+    accessToken,
+    recipeId,
+    jobId,
+  );
+  const merged = [...alreadyAdded, ...newResults];
+  const status: CartRunStatus = authFailure
+    ? "requires_user_intervention"
+    : terminalStatusFor(merged);
+  updateCartRun(jobId, status, merged);
+
+  logger.info("cart_runner: resume complete", {
+    recipeId,
+    jobId,
+    status,
+    addedCount: merged.filter((r) => r.status === "added").length,
+    needsAttentionCount: merged.filter((r) => r.status === "needs_attention").length,
+  });
+
+  return { jobId, status, results: merged, summary: summarize(status, merged) };
+}
+
 /** Runs a human-approved cart addition for a recipe (Spec 3 §2.3). Never
  * adds anything to the cart without having gone through the caller's
  * explicit approval step — this function assumes `approvedItems` has
@@ -283,17 +432,23 @@ export async function runCartApproval(
   idempotencyKey: string,
 ): Promise<CartRunResult> {
   // 1. Idempotency check first — the primary duplicate guard (Spec 3 §17:
-  // no cart-read exists to double-check against). Do NOT re-run any cart
-  // adds if this key was already processed.
+  // no cart-read exists to double-check against). A run already in a
+  // genuinely terminal state (completed/partially_completed/failed) replays
+  // as-is — do NOT re-run any cart adds. A run stuck in
+  // requires_user_intervention is RESUMABLE (Spec 3 §2.3 point 5) rather than
+  // replayed: re-attempt only the items not already added.
   const existing = loadExistingRun(idempotencyKey);
   if (existing) {
-    logger.info("cart_runner: idempotent replay, returning stored result", {
-      recipeId,
-      idempotencyKey,
-      jobId: existing.jobId,
-      status: existing.status,
-    });
-    return existing;
+    if (existing.status !== "requires_user_intervention") {
+      logger.info("cart_runner: idempotent replay, returning stored result", {
+        recipeId,
+        idempotencyKey,
+        jobId: existing.jobId,
+        status: existing.status,
+      });
+      return existing;
+    }
+    return resumeCartRun(recipeId, existing.jobId, approvedItems, existing.results);
   }
 
   const jobId = crypto.randomUUID();
@@ -323,45 +478,7 @@ export async function runCartApproval(
   }
 
   // 3 & 4. Sequential add, with per-item transient retry.
-  const results: CartItemResult[] = [];
-  let authFailure = false;
-
-  for (const item of approvedItems) {
-    const outcome = await addItemWithFallback(item, accessToken);
-
-    if (outcome.outcome === "added") {
-      results.push({
-        ingredientId: item.ingredientId,
-        upc: outcome.upc,
-        status: "added",
-        ...(outcome.usedFallback
-          ? { reason: `fallback candidate used — original pick (${item.upc}) was rejected` }
-          : {}),
-      });
-      continue;
-    }
-
-    if (outcome.outcome === "auth_failure") {
-      // 401 mid-run — stop processing remaining items, terminal
-      // requires_user_intervention. Do not mark this item needs_attention;
-      // it's genuinely unknown/unattempted-in-a-usable-way state, driven by
-      // the connection, not the item.
-      logger.warn("cart_runner: token invalid mid-run, stopping", {
-        recipeId,
-        jobId,
-        upc: item.upc,
-      });
-      authFailure = true;
-      break;
-    }
-
-    results.push({
-      ingredientId: item.ingredientId,
-      upc: item.upc,
-      status: "needs_attention",
-      reason: outcome.reason,
-    });
-  }
+  const { results, authFailure } = await processItems(approvedItems, accessToken, recipeId, jobId);
 
   const status: CartRunStatus = authFailure
     ? "requires_user_intervention"

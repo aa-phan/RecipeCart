@@ -39,7 +39,6 @@ class FakeChild extends EventEmitter {
 // stdout/stderr/close emitters — `spawnedChildren` lets a test reach whichever
 // attempt (1st, 2nd, ...) it needs to drive.
 let spawnedChildren: FakeChild[];
-let fakeChild: FakeChild;
 const spawnMock = vi.fn((..._args: unknown[]) => {
   const child = new FakeChild();
   spawnedChildren.push(child);
@@ -57,7 +56,6 @@ let jobDir: string;
 beforeEach(() => {
   jobDir = fs.mkdtempSync(path.join(os.tmpdir(), "download-test-"));
   spawnedChildren = [];
-  fakeChild = new FakeChild();
   spawnMock.mockClear();
   spawnMock.mockImplementation(() => {
     const child = new FakeChild();
