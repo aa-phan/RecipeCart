@@ -11,6 +11,7 @@ import { searchProducts } from "../kroger/client.js";
 import type { KrogerProductItem } from "../kroger/types.js";
 import { getDb } from "../platform/db.js";
 import { logger } from "../platform/logger.js";
+import { config } from "../platform/config.js";
 import {
   computeUnitPrice,
   quantityFitScore,
@@ -716,6 +717,67 @@ export async function matchRecipeAndPersist(
     persistMatch(match);
   }
   return results;
+}
+
+interface OldestMatchRow {
+  oldest: string | null;
+}
+
+/** Parses a `datetime('now')`-style sqlite timestamp ("YYYY-MM-DD HH:MM:SS",
+ * always UTC) into epoch ms. LIVE-VERIFIED gotcha: `new Date(sqliteString)`
+ * WITHOUT this fix parses the string as LOCAL time, not UTC — a real ~5h skew
+ * in this environment's timezone. Never parse a sqlite datetime string with a
+ * bare `new Date(...)`; always convert to a proper ISO string first. */
+function parseSqliteUtcDatetime(s: string): number {
+  return new Date(s.replace(" ", "T") + "Z").getTime();
+}
+
+/** Age (ms) since a recipe's Kroger product-match search results were last
+ * refreshed — the OLDEST per-ingredient `product_matches.updated_at`, since
+ * matchRecipeAndPersist always re-matches every ingredient of a recipe in one
+ * pass (a partial per-ingredient staleness signal wouldn't be actionable).
+ * Returns null when the recipe has no persisted matches yet (nothing to be
+ * stale — a first match is never "stale"). */
+function matchAgeMs(recipeId: string): number | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT MIN(pm.updated_at) as oldest
+       FROM product_matches pm JOIN ingredients i ON i.id = pm.ingredient_id
+       WHERE i.recipe_id = ?`,
+    )
+    .get(recipeId) as unknown as OldestMatchRow | undefined;
+  if (!row?.oldest) return null;
+  return Date.now() - parseSqliteUtcDatetime(row.oldest);
+}
+
+/** Spec 3 §2.2 staleness rule (A3-6): "re-run search if the recipe has sat in
+ * awaiting_review past a config window... before a cart run uses its
+ * prices." True when persisted matches exist AND are older than
+ * config.kroger.searchStalenessWindowMs. A recipe with no matches yet is
+ * NOT stale (there's nothing to refresh — that's the normal first-match
+ * case, not a staleness condition). */
+export function isMatchStale(recipeId: string): boolean {
+  const age = matchAgeMs(recipeId);
+  return age !== null && age > config.kroger.searchStalenessWindowMs;
+}
+
+/** Re-runs matching for a recipe ONLY if its persisted matches are stale
+ * (isMatchStale) — a no-op returning null otherwise, so a caller in the
+ * common case (freshly-matched recipe, approved promptly) doesn't pay for an
+ * extra Kroger search pass. Called by `recipecart approve` right before
+ * selecting approved items, so a cart run never mutates the cart against
+ * prices/availability that might be a day or more stale. */
+export async function refreshIfStale(
+  recipeId: string,
+  locationId: string,
+  options: MatchOptions = {},
+): Promise<IngredientMatch[] | null> {
+  if (!isMatchStale(recipeId)) return null;
+  logger.info("matcher: persisted matches are stale, re-running search before cart approval", {
+    recipeId,
+  });
+  return matchRecipeAndPersist(recipeId, locationId, options);
 }
 
 function persistMatch(match: IngredientMatch): void {

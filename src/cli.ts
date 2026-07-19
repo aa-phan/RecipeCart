@@ -21,7 +21,7 @@ import { runCartApproval, type ApprovedCartItem } from "./kroger/cart_runner.js"
 import { extract } from "./pipeline/extract/index.js";
 import { ExtractionError } from "./pipeline/extract/failures.js";
 import type { Recipe } from "./pipeline/schema.js";
-import { matchRecipeAndPersist, renderMatchesTable } from "./matcher/index.js";
+import { matchRecipeAndPersist, refreshIfStale, renderMatchesTable } from "./matcher/index.js";
 import type { ProductCandidate } from "./matcher/types.js";
 
 const program = new Command();
@@ -176,6 +176,18 @@ program
   .description("Add approved items to the real Kroger cart and print itemized results")
   .action(async (recipeId: string) => {
     try {
+      // Staleness (Spec 3 §2.2, A3-6): re-run the Kroger search before using
+      // a recipe's prices/availability if its matches are more than
+      // config.kroger.searchStalenessWindowMs old — a no-op in the common
+      // case (approve run promptly after extraction). Needs a store to
+      // re-search against; if none is configured, skip the refresh rather
+      // than block approval on a config problem approve doesn't otherwise
+      // need to care about (the existing, possibly-stale matches still work).
+      const store = loadStoreLocation();
+      if (store) {
+        await refreshIfStale(recipeId, store.locationId);
+      }
+
       const { approved, skipped } = selectApprovedItems(recipeId);
 
       for (const item of skipped) {
