@@ -14,6 +14,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../../platform/config.js";
 import { logger } from "../../platform/logger.js";
 import { validateRecipe, SchemaValidationError, SCHEMA_VERSION, type Recipe } from "../schema.js";
+import { ExtractionError, userFacingReasonFor } from "./failures.js";
 import type { AsrSegment } from "./asr.js";
 import type { OcrBlock } from "./ocr.js";
 import fs from "node:fs";
@@ -26,6 +27,30 @@ export class ReconcileFailedError extends Error {
   ) {
     super(message);
     this.name = "ReconcileFailedError";
+  }
+}
+
+/** Run a Claude messages.create, mapping a post-retry API failure to the
+ * terminal `model_call_failed` class (Spec 2 §3). The SDK already retried
+ * transient 429/5xx/connection errors `claudeMaxRetries` times before the
+ * error reaches here (see getClient) — so an Anthropic.APIError at this point
+ * is genuinely terminal, not a blip. A non-API error (bug, bad input) is
+ * rethrown untouched. */
+async function createMessageOrFail(
+  anthropic: Anthropic,
+  params: Anthropic.MessageCreateParamsNonStreaming,
+): Promise<Anthropic.Message> {
+  try {
+    return await anthropic.messages.create(params);
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) {
+      logger.error("reconcile: Claude call failed after SDK retries", {
+        status: err.status,
+        message: err.message,
+      });
+      throw new ExtractionError("model_call_failed", userFacingReasonFor("model_call_failed"), err);
+    }
+    throw err;
   }
 }
 
@@ -44,7 +69,13 @@ export interface ReconcileInput {
 let client: Anthropic | undefined;
 function getClient(): Anthropic {
   if (!client) {
-    client = new Anthropic({ apiKey: config.secrets.anthropicApiKey });
+    // maxRetries: the SDK retries transient 429/5xx/connection errors with
+    // exponential backoff on its own (Spec 2 §3 model_call_failed ×3) — no
+    // hand-rolled backoff loop needed.
+    client = new Anthropic({
+      apiKey: config.secrets.anthropicApiKey,
+      maxRetries: config.extraction.claudeMaxRetries,
+    });
   }
   return client;
 }
@@ -61,7 +92,9 @@ Schema (TypeScript-shape description):
   "title"?: {
     "value": string | null,
     "evidence"?: [{ "source_type": "asr"|"ocr"|"caption", "timestamp"?: number, "frame_ref"?: string, "snippet"?: string }],
-    "null_reason"?: string
+    "null_reason"?: string,
+    "confidence"?: "high" | "medium" | "low",   // on every non-null evidenced field — see rule 8
+    "conflict"?: { "resolved_source": "asr"|"ocr"|"caption", "alternatives": [{ "source_type": "asr"|"ocr"|"caption", "value": string }] }  // only when sources disagreed — see rule 8
   },
   "ingredients": [
     {
@@ -87,7 +120,9 @@ CRITICAL RULES:
 4. is_pantry_staple: leave this false unless you have strong evidence it's a common pantry staple (salt, pepper, oil, water, sugar, flour) — a later postprocessing step will also apply a fixed staple list, so it's fine to leave ambiguous cases false.
 5. dietary_attributes.stated is ONLY for attributes the video explicitly claims (e.g. narration says "this is vegan"). dietary_attributes.inferred is for attributes you can reasonably infer from the ingredient list (e.g. no meat/dairy/eggs present) but that were never explicitly claimed — never put an inferred attribute into "stated".
 6. Frame images are evidence of on-screen TEXT/graphics only (ingredient labels, quantity call-outs, a printed recipe card or slide) — they are NOT a general visual-recognition input. Do not name an ingredient because you can visually recognize the food in a frame (e.g. "that looks like raw beef and scallions in a bowl") unless legible on-screen text, the caption, or narration also names it. A frame showing food being prepared with no legible text is not valid evidence for what that food is — treat it as unstated (value: null, with a null_reason like "only shown in video footage, not named in caption, transcript, or legible on-screen text") rather than guessing from appearance. Only tag evidence source_type "ocr" when it reflects text actually legible in that frame.
-7. Output raw JSON only. No markdown fences, no explanation before or after.`;
+7. Output raw JSON only. No markdown fences, no explanation before or after.
+8. For EVERY evidenced field ({value, evidence, null_reason} object) that has a non-null value, add a "confidence" band: "high" when the value is stated directly and unambiguously in the evidence (a clear on-screen quantity, an explicit spoken ingredient), "medium" when it's evidenced but somewhat indirect or paraphrased, "low" when it's the weakest reading you'd still stand behind. Confidence is about how well the EVIDENCE supports the value — it is NOT a license to include unevidenced values at "low"; an unevidenced value is still null + null_reason (rule 1), never a low-confidence guess. Omit "confidence" on null fields.
+9. When two evidence sources DISAGREE on the same field's value (e.g. OCR shows "2 cups flour" but narration says "about a cup"), resolve it by the rule-3 priority (ocr > caption > asr), put the winning value in "value" with its evidence, AND record the discarded reading(s) in "conflict": { resolved_source, alternatives: [{source_type, value}] }. Only include "conflict" when there was a genuine cross-source disagreement — omit it otherwise.`;
 
 function buildUserContent(input: ReconcileInput): Anthropic.ContentBlockParam[] {
   const blocks: Anthropic.ContentBlockParam[] = [];
@@ -173,7 +208,7 @@ export async function reconcile(input: ReconcileInput): Promise<Recipe> {
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: userContent }];
 
-  const first = await anthropic.messages.create({
+  const first = await createMessageOrFail(anthropic, {
     model: config.extraction.claudeModel,
     max_tokens: config.extraction.claudeMaxTokens,
     // Sonnet 5 runs adaptive (extended) thinking by default when `thinking`
@@ -226,7 +261,7 @@ export async function reconcile(input: ReconcileInput): Promise<Recipe> {
       ],
     });
 
-    const second = await anthropic.messages.create({
+    const second = await createMessageOrFail(anthropic, {
       model: config.extraction.claudeModel,
       max_tokens: config.extraction.claudeMaxTokens,
       thinking: { type: "disabled" },
@@ -239,9 +274,12 @@ export async function reconcile(input: ReconcileInput): Promise<Recipe> {
     try {
       secondCandidate = parseJson(secondText);
     } catch (parseErr) {
-      throw new ReconcileFailedError(
-        "corrective re-prompt response was not valid JSON",
-        parseErr instanceof Error ? parseErr.message : String(parseErr),
+      // One corrective re-prompt already spent; a still-unparseable response
+      // is terminal schema_validation_failed (Spec 2 §3).
+      throw new ExtractionError(
+        "schema_validation_failed",
+        userFacingReasonFor("schema_validation_failed", "response was not valid JSON"),
+        parseErr,
       );
     }
 
@@ -249,9 +287,13 @@ export async function reconcile(input: ReconcileInput): Promise<Recipe> {
       return validateRecipe(secondCandidate);
     } catch (secondErr) {
       if (secondErr instanceof SchemaValidationError) {
-        throw new ReconcileFailedError(
-          "recipe still failed schema validation after one corrective re-prompt",
-          secondErr.issues,
+        throw new ExtractionError(
+          "schema_validation_failed",
+          userFacingReasonFor(
+            "schema_validation_failed",
+            `${secondErr.issues.length} field(s) still invalid`,
+          ),
+          secondErr,
         );
       }
       throw secondErr;
