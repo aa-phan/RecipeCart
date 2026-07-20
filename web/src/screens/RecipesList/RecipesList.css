@@ -84,6 +84,40 @@
   font-size: 0.9rem;
 }
 
+.recipes-list__duplicate-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: -0.5rem 0 1rem;
+}
+
+.recipes-list__duplicate-link {
+  color: #2563eb;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.recipes-list__duplicate-link:hover,
+.recipes-list__duplicate-link:focus-visible {
+  text-decoration: underline;
+}
+
+.recipes-list__duplicate-reprocess {
+  border: 1px solid #2563eb;
+  background: #fff;
+  color: #2563eb;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.recipes-list__duplicate-reprocess:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .recipes-list__submit-error {
   color: #8a1f11;
   background: #fdecea;

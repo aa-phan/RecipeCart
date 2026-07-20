@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { apiGet, apiPost, ApiError } from "../../api/client";
 import type { RecipeListItemDto, SubmitRecipeResponse } from "../../api/types";
 import { usePolling } from "../../hooks/usePolling";
@@ -27,6 +28,7 @@ const CART_DONE_STATUSES = new Set(["completed", "partially_completed"]);
 // criteria explicitly allows "curl or a simple form" for submission, so this
 // form is spec-sanctioned, not a permanent product surface.
 export default function RecipesList() {
+  const navigate = useNavigate();
   const [recipes, setRecipes] = useState<RecipeListItemDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -34,6 +36,14 @@ export default function RecipesList() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitNote, setSubmitNote] = useState<string | null>(null);
+  // Set only when a submission comes back as a duplicate (`created: false`)
+  // — carries the existing job's id so we can offer "view existing" /
+  // "reprocess" actions alongside the note. Cleared on the next submit.
+  const [duplicateJob, setDuplicateJob] = useState<{ jobId: string } | null>(
+    null,
+  );
+  const [reprocessing, setReprocessing] = useState(false);
+  const [reprocessError, setReprocessError] = useState<string | null>(null);
 
   const fetchRecipes = useCallback(async () => {
     try {
@@ -85,6 +95,8 @@ export default function RecipesList() {
     setSubmitting(true);
     setSubmitError(null);
     setSubmitNote(null);
+    setDuplicateJob(null);
+    setReprocessError(null);
     try {
       const result = await apiPost<SubmitRecipeResponse>("/api/recipes", {
         sourceUrl: trimmed,
@@ -95,6 +107,9 @@ export default function RecipesList() {
           ? "Submitted — it'll appear below as it processes."
           : "Already submitted recently — showing its current status below.",
       );
+      if (!result.created) {
+        setDuplicateJob({ jobId: result.jobId });
+      }
       await fetchRecipes();
     } catch (err) {
       setSubmitError(
@@ -102,6 +117,21 @@ export default function RecipesList() {
       );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleReprocess = async () => {
+    if (!duplicateJob) return;
+    setReprocessing(true);
+    setReprocessError(null);
+    try {
+      const response = await apiPost<SubmitRecipeResponse>(
+        `/api/recipes/${duplicateJob.jobId}/reprocess`,
+      );
+      navigate(`/recipes/${response.jobId}`);
+    } catch {
+      setReprocessError("Couldn't restart processing. Please try again.");
+      setReprocessing(false);
     }
   };
 
@@ -139,6 +169,29 @@ export default function RecipesList() {
       {submitNote && (
         <p className="recipes-list__submit-note" role="status">
           {submitNote}
+        </p>
+      )}
+      {duplicateJob && (
+        <div className="recipes-list__duplicate-actions">
+          <Link
+            to={`/recipes/${duplicateJob.jobId}`}
+            className="recipes-list__duplicate-link"
+          >
+            View existing
+          </Link>
+          <button
+            type="button"
+            onClick={handleReprocess}
+            disabled={reprocessing}
+            className="recipes-list__duplicate-reprocess"
+          >
+            {reprocessing ? "Reprocessing…" : "Reprocess"}
+          </button>
+        </div>
+      )}
+      {reprocessError && (
+        <p className="recipes-list__submit-error" role="alert">
+          {reprocessError}
         </p>
       )}
       {submitError && (
