@@ -24,7 +24,7 @@ import type { FastifyInstance } from "fastify";
 import { getDb, DEFAULT_USER_ID } from "../../platform/database.js";
 
 export default async function setupRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/setup/device-token", { config: { skipAuth: true } }, async () => {
+  app.post("/setup/device-token", { config: { skipAuth: true } }, async (_request, reply) => {
     const token = crypto.randomBytes(32).toString("hex");
     const hash = crypto.createHash("sha256").update(token).digest("hex");
 
@@ -33,6 +33,23 @@ export default async function setupRoutes(app: FastifyInstance): Promise<void> {
       .set({ device_token_hash: hash })
       .where("id", "=", DEFAULT_USER_ID)
       .execute();
+
+    // Also log the CURRENT browser in immediately via an HttpOnly cookie —
+    // the original AuthGate design (web/src/auth/AuthGate.tsx) required a
+    // separate manual copy-paste-into-a-form step because it had no server
+    // route to hand the cookie off from; this route now IS that server
+    // route, so there's no reason to keep the extra hop. The response body
+    // still returns the raw token too — that's still needed for copying
+    // into the iOS Shortcut, a completely separate consumer that can't read
+    // an HttpOnly cookie (nor should it: Shortcuts stores it as plain
+    // config, not a cookie jar).
+    reply.setCookie("recipecart_device_token", token, {
+      httpOnly: true,
+      path: "/",
+      maxAge: 31536000,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
 
     return { token };
   });

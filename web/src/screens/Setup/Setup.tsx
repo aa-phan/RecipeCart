@@ -1,17 +1,24 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { apiPost, ApiError } from "../../api/client";
+import { AUTHED_FLAG_KEY } from "../../auth/AuthGate";
 import "./Setup.css";
 
 type DeviceTokenResponse = { token: string };
 
-// Device-token setup screen (Spec 1 A1-2, WS-E Phase 4). Mints a fresh
-// device token from POST /api/setup/device-token and displays it once so it
-// can be copied into the iOS Shortcut's "Get device token" step (see
-// docs/ios-shortcut.md for the full Shortcut-build walkthrough). Minting is
-// unauthenticated on the server side (see routes/setup.ts for why that's an
-// acceptable tradeoff for this single-household MVP) and OVERWRITES any
-// previously-issued token, so this screen makes that overwrite explicit
-// rather than implying the action is additive.
+// Device-token setup screen (Spec 1 A1-2, WS-E Phase 4) — the SINGLE place
+// a device token is minted and applied (AuthGate just redirects here for an
+// unauthenticated visitor; see its own doc comment). Mints a fresh token
+// from POST /api/setup/device-token, which ALSO sets an HttpOnly auth
+// cookie on this response (see routes/setup.ts) — so generating a token
+// logs the current browser in immediately, no separate paste-it-back-in
+// step. The raw token is still displayed for copying into the iOS
+// Shortcut's "Get device token" step (see docs/ios-shortcut.md) — a
+// completely separate consumer that needs the plain value, not a cookie.
+// Minting is unauthenticated on the server side (see routes/setup.ts for
+// why that's an acceptable tradeoff for this single-household MVP) and
+// OVERWRITES any previously-issued token, so this screen makes that
+// overwrite explicit rather than implying the action is additive.
 export default function Setup() {
   const [token, setToken] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -25,6 +32,10 @@ export default function Setup() {
     try {
       const result = await apiPost<DeviceTokenResponse>("/api/setup/device-token");
       setToken(result.token);
+      // The response just set this browser's auth cookie server-side —
+      // flip the client-side "am I set up" flag AuthGate checks so
+      // navigating away doesn't bounce back here.
+      localStorage.setItem(AUTHED_FLAG_KEY, "1");
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Couldn't generate a device token.",
@@ -84,8 +95,9 @@ export default function Setup() {
           </div>
 
           <p className="setup__instructions">
-            Paste this token into the "Get device token" step of your RecipeCart
-            Shortcut — see the setup guide (<code>docs/ios-shortcut.md</code>) for
+            This browser is now signed in — no further steps needed here. If you're
+            also setting up the iOS Shortcut, copy this token into its "Get device
+            token" step — see the setup guide (<code>docs/ios-shortcut.md</code>) for
             details on building the Shortcut.
           </p>
 
@@ -94,6 +106,10 @@ export default function Setup() {
             isn't additive. Any Shortcut or browser still using the old token will need
             to be updated with this one.
           </p>
+
+          <Link to="/" className="setup__continue">
+            Continue to RecipeCart →
+          </Link>
         </div>
       )}
     </main>

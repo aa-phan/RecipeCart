@@ -27,42 +27,32 @@ is a confirmation within 2 seconds of the share tap (Spec 1 §2.2).
 
 ## 2. Prerequisites
 
-- **A device token.** Today's only mechanism is a CLI command run from a
-  machine with access to the RecipeCart database:
+- **A device token.** Visit `/setup` on the deployed web app (e.g.
+  `https://<your-production-domain>/setup`) and click "Generate device
+  token." This mints a fresh token, displays it once for copying, and —
+  as of this session — also logs the browser you're viewing it in in
+  automatically (it sets an HttpOnly auth cookie server-side in the same
+  response, so there's no separate paste-it-back-in step for the browser).
+  The Shortcut still needs the raw value copied into its "Get device token"
+  step below, since a Shortcut can't read a cookie.
 
-  ```
-  npm run cli -- create-device-token
-  ```
+  A CLI fallback still exists if you have shell access to the machine
+  running the API (`npm run cli -- create-device-token`, or `node
+  dist/cli.js create-device-token` against a built image) — same
+  crypto/storage under the hood as `/setup`, just without a browser.
 
-  (or however `cli.ts` is invoked in this repo's `package.json` — check
-  before running). This prints the raw token **once**:
+  Either way, only the SHA-256 hash is stored server-side — if the token is
+  lost, generate a new one.
 
-  > Device token (save this — it will not be shown again):
-  >
-  > &nbsp;&nbsp;`<64 hex characters>`
-  >
-  > Use it as a Bearer header or paste it into the web app's login screen.
-
-  Only the SHA-256 hash is stored server-side, so if the token is lost,
-  re-run the command to mint a new one.
-
-  **Important caveat found in the code, not the spec:** `create-device-token`
+  **Important caveat found in the code, not the spec:** minting a token
   writes to a single hardcoded `DEFAULT_USER_ID` row (see
-  `src/platform/database.ts` / `src/cli.ts`). There is currently only one
-  device-token "slot" in the whole system. Running the command again
-  **overwrites** that same user's token — it does not mint a second,
-  independent token for a second household member. Anyone who already
-  built a Shortcut with the old token will start getting 401s the moment
-  someone else re-runs `create-device-token`. Until per-user tokens exist,
-  treat token minting as a one-time, whole-household event, or coordinate
-  before re-running it.
-
-  A web setup page (`routes/setup.ts`, tracked in `src/api/server.ts` as
-  `TODO(WS-E, Phase 4)`) is being built in parallel this same session to
-  replace the CLI step with a first-visit token display — likely at a path
-  like `/setup` on the web app, exact path TBD by that workstream. Once
-  live, use that instead; the CLI path documented here still works as a
-  fallback.
+  `src/platform/database.ts`). There is currently only one device-token
+  "slot" in the whole system. Minting again **overwrites** that same
+  user's token — it does not mint a second, independent token for a second
+  household member. Anyone who already built a Shortcut with the old token
+  will start getting 401s the moment someone else generates a new one.
+  Until per-user tokens exist, treat token minting as a one-time,
+  whole-household event, or coordinate before re-running it.
 
 - **The API's base URL.**
   - Local-network testing (before Phase 4 cloud deploy): `http://<lan-ip-of-the-machine-running-the-api>:3001` — replace `<lan-ip>` with that machine's LAN IP (e.g. `192.168.1.42`). Port `3001` is confirmed from `src/api/index.ts` / `src/platform/config.ts`: `apiPort` defaults to `3001`, overridable via the `PORT` or `API_PORT` env vars — if either is set when the API process is started, use that value instead. The iPhone and the API host must be on the same Wi-Fi network.

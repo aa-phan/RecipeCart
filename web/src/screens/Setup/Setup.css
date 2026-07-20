@@ -87,3 +87,15 @@
   margin: 0.9rem 0 0;
   font-size: 0.85rem;
 }
+
+.setup__continue {
+  display: inline-block;
+  margin-top: 1.1rem;
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.setup__continue:hover {
+  text-decoration: underline;
+}
