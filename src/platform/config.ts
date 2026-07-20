@@ -179,8 +179,16 @@ export const config = {
   // (pipeline/extract/index.ts) — this is a periodic safety-net sweep for
   // anything a hard crash (kill -9, OOM) left behind before that finally
   // could run, so the worker volume doesn't grow unbounded over many restarts.
+  // ttlHours lowered from 6 to 1 (2026-07-20, real incident): a burst of
+  // real OOM crashes during production testing filled the 500MB Railway
+  // volume to 100% within roughly an hour, well inside the old 6h window,
+  // blocking every subsequent job with "No space left on device" (ffmpeg)
+  // until manually cleaned up. A dir's mtime keeps updating while a job is
+  // genuinely still writing to it, so a short TTL only catches truly
+  // abandoned (crashed) directories, not slow-but-live jobs — safe to keep
+  // tight given the volume is this small.
   tempMedia: {
-    ttlHours: 6,
+    ttlHours: 1,
     sweepIntervalMs: 30 * 60_000,
   },
 
