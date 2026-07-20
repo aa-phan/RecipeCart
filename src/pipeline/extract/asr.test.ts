@@ -61,6 +61,7 @@ describe("transcribeAudio", () => {
     await transcribeAudio("/tmp/audio.wav");
     expect(pipelineMock).toHaveBeenCalledWith("automatic-speech-recognition", "fake/whisper-model", {
       cache_dir: "/fake/data",
+      dtype: "q8",
     });
   });
 

@@ -36,8 +36,23 @@ function getTranscriber(): Promise<AutomaticSpeechRecognitionPipeline> {
     // on every deploy (only DATA_DIR is a persistent volume), so the model
     // would silently re-download on every deploy. Mirror ocr.ts's cachePath
     // convention and point it at the same persistent data dir.
+    //
+    // dtype: "q8" — REAL production bug, not a preemptive optimization:
+    // transformers.js's default dtype in Node.js (device "cpu"/onnxruntime-
+    // node) is full fp32 (it only auto-picks a quantized dtype for WASM/
+    // browser environments) — measured locally at ~930MB RSS just to load
+    // this "base" model, which OOM-killed the Railway worker (1024MB limit)
+    // on every real job, including caption-sufficient ones (ASR runs
+    // unconditionally, not just on the OCR/vision-escalation path). The q8
+    // quantized variant measured ~365MB RSS to load — same model family,
+    // Xenova's standard published quantized ONNX export, not a smaller/
+    // different model. Some transcription-accuracy loss vs fp32 is a known,
+    // accepted tradeoff of int8 quantization — acceptable here since ASR
+    // output feeds Claude's reconciliation as one evidence source among
+    // several (caption, OCR), not the sole source of truth.
     transcriberPromise = pipeline("automatic-speech-recognition", config.extraction.whisperModel, {
       cache_dir: config.dataDir,
+      dtype: "q8",
     });
   }
   return transcriberPromise;
