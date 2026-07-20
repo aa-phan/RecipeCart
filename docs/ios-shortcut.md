@@ -269,6 +269,7 @@ Mirrors Spec 1 §7 ("Setup" considerations) and blocker B1-3:
 
 ## 6. Open questions / things this doc could not confirm from code
 
-- The exact **path** of the forthcoming web setup page (`routes/setup.ts`)
-  is not yet decided by that parallel workstream; `/setup` is a guess, not
-  a confirmed path. Re-check once that route lands.
+- ~~The exact path of the web setup page is not yet decided~~ — resolved:
+  `/setup` is the real, live path (`web/src/screens/Setup/Setup.tsx`),
+  verified working end-to-end against production
+  (`https://recipecart-production.up.railway.app/setup`) on 2026-07-20.

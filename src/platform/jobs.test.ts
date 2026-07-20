@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { getDb } from "./database.js";
 import { resetDb } from "./test-db.js";
 import {
@@ -30,6 +30,44 @@ describe("jobs queue", () => {
     const different = await enqueueJob(OTHER_URL);
     expect(different.created).toBe(true);
     expect(different.job.id).not.toBe(first.job.id);
+  });
+
+  describe("short-link dedup", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("de-dupes two DIFFERENT short-link tokens that resolve to the SAME video", async () => {
+      // Real production gap found via live iOS Shortcut testing 2026-07-20:
+      // TikTok mints a fresh /t/<token>/ short-link every time Share is
+      // tapped, even for the identical video, so the raw-URL-only dedup key
+      // used to treat these as two unrelated submits.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ url: VIDEO_URL }),
+      );
+
+      const first = await enqueueJob("https://www.tiktok.com/t/AAAA111/");
+      expect(first.created).toBe(true);
+
+      const second = await enqueueJob("https://www.tiktok.com/t/BBBB222/");
+      expect(second.created).toBe(false);
+      expect(second.job.id).toBe(first.job.id);
+    });
+
+    it("falls back to raw-URL dedup when redirect resolution fails", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+
+      const shortUrl = "https://www.tiktok.com/t/CCCC333/";
+      const first = await enqueueJob(shortUrl);
+      expect(first.created).toBe(true);
+
+      // Same raw URL string, resolution still failing — still de-dupes via
+      // the raw-URL fallback, not a hard failure.
+      const second = await enqueueJob(shortUrl);
+      expect(second.created).toBe(false);
+      expect(second.job.id).toBe(first.job.id);
+    });
   });
 
   it("claims the next job atomically and moves it to validating", async () => {

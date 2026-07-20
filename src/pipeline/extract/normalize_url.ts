@@ -52,3 +52,35 @@ export function normalizeUrl(rawUrl: string): NormalizedUrl {
   const match = parsed.pathname.match(ID_PATTERN);
   return { url: rawUrl, videoId: match ? match[1]! : null };
 }
+
+/** Resolves a short-link's redirect chain (vm.tiktok.com/xxx,
+ * tiktok.com/t/xxx) to extract the real video id, WITHOUT invoking yt-dlp —
+ * a lightweight HEAD request following redirects, not a download. Exists
+ * because job-creation dedup (platform/jobs.ts's deriveIdempotencyKey) needs
+ * a stable key at submission time, and short-link tokens are minted fresh on
+ * every share (confirmed live: TikTok's native Share button produces a new
+ * `/t/<token>/` each time, even for the identical underlying video) — the
+ * raw URL string is therefore useless as a dedup key for the most common
+ * real-world share path. Real production gap, found via live iOS Shortcut
+ * testing 2026-07-20, not a theoretical concern.
+ *
+ * Returns null on ANY failure (network error, timeout, non-TikTok redirect
+ * target) rather than throwing — callers fall back to raw-URL-based
+ * deduping, which is strictly no worse than the pre-existing behavior. This
+ * function must never turn a resolvable network hiccup into a failed job
+ * submission. */
+export async function resolveShortLinkVideoId(
+  rawUrl: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  try {
+    const response = await fetch(rawUrl, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return normalizeUrl(response.url).videoId;
+  } catch {
+    return null;
+  }
+}

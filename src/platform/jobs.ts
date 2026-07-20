@@ -7,7 +7,7 @@ import { sql } from "kysely";
 import { getDb, DEFAULT_USER_ID, type JobsTable } from "./database.js";
 import type { Selectable } from "kysely";
 import { config } from "./config.js";
-import { normalizeUrl } from "../pipeline/extract/normalize_url.js";
+import { normalizeUrl, resolveShortLinkVideoId } from "../pipeline/extract/normalize_url.js";
 
 export type Job = Selectable<JobsTable>;
 
@@ -48,12 +48,31 @@ const REQUEUEABLE_STATES: JobStatusValue[] = [
 /** Derive the job-creation idempotency key (Spec 4 §2.5): a re-submit of the
  * same (user, video) inside `duplicateWindowMs` collapses to the same key, so
  * a double-tapped share surfaces the in-flight job instead of spawning a
- * duplicate. Uses the parsed video id when available, else the raw URL. */
-function deriveIdempotencyKey(userId: string, sourceUrl: string): string {
+ * duplicate. Uses the parsed video id when available.
+ *
+ * For short-link forms (videoId unresolvable from the URL shape alone), this
+ * resolves the redirect chain to get a real, stable video id BEFORE deriving
+ * the key — real production gap found via live iOS Shortcut testing
+ * 2026-07-20: TikTok's native Share button mints a fresh `/t/<token>/`
+ * short-link every time, even for the identical underlying video, so keying
+ * on the raw URL string (the old behavior) meant re-sharing the same video
+ * almost never actually deduped in practice, only when a user happened to
+ * paste the literal identical URL string twice. Falls back to the raw URL on
+ * any resolution failure (network hiccup, timeout) — strictly no worse than
+ * the old behavior, never a hard failure. */
+async function deriveIdempotencyKey(userId: string, sourceUrl: string): Promise<string> {
   let key: string;
   try {
     const { videoId, url } = normalizeUrl(sourceUrl);
-    key = videoId ?? url;
+    if (videoId) {
+      key = videoId;
+    } else {
+      const resolvedVideoId = await resolveShortLinkVideoId(
+        url,
+        config.jobs.shortLinkResolveTimeoutMs,
+      );
+      key = resolvedVideoId ?? url;
+    }
   } catch {
     key = sourceUrl; // let validation reject it later; still de-dupe identical submits
   }
@@ -70,7 +89,7 @@ export async function enqueueJob(
   opts: { bypassDedup?: boolean } = {},
 ): Promise<{ job: Job; created: boolean }> {
   const db = getDb();
-  const idempotencyKey = deriveIdempotencyKey(userId, sourceUrl);
+  const idempotencyKey = await deriveIdempotencyKey(userId, sourceUrl);
   // `bypassDedup` is used by the API's reprocess endpoint: it wants a brand
   // new job for the same source URL even though the normal dedupe window
   // would otherwise collapse it into the existing (already-terminal) job.

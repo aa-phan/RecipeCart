@@ -151,6 +151,14 @@ export const config = {
     // existing job rather than creating a new one — a double-tapped share
     // surfaces the in-flight job (Spec 4 §2.5 job-creation idempotency).
     duplicateWindowMs: 10 * 60_000,
+    // Cap on the short-link redirect-resolution HEAD request (jobs.ts's
+    // deriveIdempotencyKey, normalize_url.ts's resolveShortLinkVideoId) —
+    // only fires for short-link forms (videoId not resolvable from the URL
+    // shape alone), never full-form /video/<id> submits, so this doesn't
+    // add latency to the common case. Kept tight against Spec 1's ~2s
+    // share-to-confirmation target; a timeout falls back to raw-URL dedup
+    // rather than failing the submission.
+    shortLinkResolveTimeoutMs: 2_500,
     // Heartbeat staleness (Spec 4 A4-6, recommended 10 min): an in-progress
     // job whose lock hasn't been refreshed within this window is considered
     // abandoned (crashed worker) and is requeued (re-runnable stages) or moved
