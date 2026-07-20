@@ -102,8 +102,14 @@ describe("extract (orchestrator)", () => {
     expect(mediaSplitMock).toHaveBeenCalledWith(expect.objectContaining({ extractFrames: false }));
     expect(dedupFramesMock).not.toHaveBeenCalled();
     expect(ocrFramesMock).not.toHaveBeenCalled();
+    // ASR gated by the same caption-sufficiency check as OCR (2026-07-20):
+    // narration's only roles are unused `steps` extraction and a secondary
+    // ingredient-disambiguation signal, not worth the OOM risk (see the
+    // recipecart-worker-asr-oom memory) on a path that already has enough
+    // ingredient evidence from the caption alone.
+    expect(transcribeAudioMock).not.toHaveBeenCalled();
     expect(reconcileMock).toHaveBeenCalledWith(
-      expect.objectContaining({ ocrBlocks: [], escalationFramePaths: [] }),
+      expect.objectContaining({ ocrBlocks: [], escalationFramePaths: [], asrSegments: [] }),
     );
     expect(result.recipe.result_type).toBe("recipe");
     expect(result.recipeId).toBe("job-1");
@@ -204,6 +210,7 @@ describe("extract (orchestrator)", () => {
       "/tmp/job-dir/frames/frame-002.jpg",
     ]);
     expect(ocrFramesMock).toHaveBeenCalledWith(["/tmp/job-dir/frames/frame-001.jpg"]);
+    expect(transcribeAudioMock).toHaveBeenCalledWith("/tmp/job-dir/audio.wav");
     expect(reconcileMock).toHaveBeenCalledWith(
       expect.objectContaining({ escalationFramePaths: ["/tmp/job-dir/frames/frame-001.jpg"] }),
     );

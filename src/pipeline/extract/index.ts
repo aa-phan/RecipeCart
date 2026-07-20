@@ -108,8 +108,20 @@ export async function extract(
 
     const dedupedFramePaths = extractFrames ? await dedupFrames(splitResult.rawFramePaths) : [];
 
+    // ASR is gated by the SAME caption-sufficiency check as OCR/frame
+    // extraction (2026-07-20 product decision): narration's only two roles
+    // are capturing `steps` (confirmed unused — never rendered anywhere in
+    // web/, dead weight) and a secondary tie-breaking evidence source for
+    // ingredient values when OCR/caption conflict (reconcile.ts's rule 3/9).
+    // This app's actual scope is ingredients -> cart, not step-by-step
+    // instructions, so skipping ASR whenever the caption already covers
+    // ingredients trades a minor loss of that secondary disambiguation for
+    // completely avoiding the ASR OOM (Whisper inference peaks ~1.3-2GB,
+    // exceeding the Railway worker's 1024MB limit — see the
+    // recipecart-worker-asr-oom memory) on the common, caption-sufficient
+    // path.
     const [asrSegments, ocrBlocks] = await Promise.all([
-      transcribeAudio(splitResult.audioPath),
+      extractFrames ? transcribeAudio(splitResult.audioPath) : Promise.resolve([]),
       extractFrames ? ocrFrames(dedupedFramePaths) : Promise.resolve([]),
     ]);
 
