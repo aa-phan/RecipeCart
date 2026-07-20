@@ -152,6 +152,41 @@ describe("matchIngredient", () => {
     expect(result.deprioritized).toBe(false);
   });
 
+  it("carries the front-perspective thumbnail image URL through to the candidate", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          images: [
+            {
+              perspective: "front",
+              featured: true,
+              sizes: [
+                { size: "xlarge", url: "https://kroger.example/front-xlarge.jpg" },
+                { size: "thumbnail", url: "https://kroger.example/front-thumb.jpg" },
+              ],
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 1 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(ingredient(), "ing-1", "01100002", "tok");
+
+    expect(result.candidates[0]!.imageUrl).toBe("https://kroger.example/front-thumb.jpg");
+  });
+
+  it("leaves imageUrl undefined when Kroger returns no images for the product", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [product()], // default fixture has no `images` field
+      meta: { pagination: { start: 0, limit: 10, total: 1 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const result = await matchIngredient(ingredient(), "ing-1", "01100002", "tok");
+
+    expect(result.candidates[0]!.imageUrl).toBeUndefined();
+  });
+
   it("marks pantry staples as deprioritized but still matches them", async () => {
     (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: [product()],

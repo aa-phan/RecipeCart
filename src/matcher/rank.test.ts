@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeUnitPrice, quantityFitScore, textRelevanceScore } from "./rank.js";
+import { computeUnitPrice, extractImageUrl, quantityFitScore, textRelevanceScore } from "./rank.js";
 
 describe("textRelevanceScore", () => {
   it("scores full-phrase matches highly", () => {
@@ -120,5 +120,72 @@ describe("computeUnitPrice", () => {
 
   it("returns undefined when size is unparseable", () => {
     expect(computeUnitPrice(4, "assorted")).toBeUndefined();
+  });
+});
+
+describe("extractImageUrl", () => {
+  it("picks the front-perspective image's smallest available size", () => {
+    const url = extractImageUrl([
+      {
+        perspective: "back",
+        featured: false,
+        sizes: [{ size: "thumbnail", url: "https://kroger.example/back-thumb.jpg" }],
+      },
+      {
+        perspective: "front",
+        featured: true,
+        sizes: [
+          { size: "xlarge", url: "https://kroger.example/front-xlarge.jpg" },
+          { size: "medium", url: "https://kroger.example/front-medium.jpg" },
+          { size: "thumbnail", url: "https://kroger.example/front-thumb.jpg" },
+        ],
+      },
+    ]);
+    expect(url).toBe("https://kroger.example/front-thumb.jpg");
+  });
+
+  it("falls back to the default-flagged image when no image is front-perspective", () => {
+    const url = extractImageUrl([
+      {
+        perspective: "left",
+        featured: false,
+        sizes: [{ size: "small", url: "https://kroger.example/left-small.jpg" }],
+      },
+      {
+        perspective: "right",
+        featured: true,
+        sizes: [{ size: "small", url: "https://kroger.example/right-small.jpg" }],
+      },
+    ]);
+    expect(url).toBe("https://kroger.example/right-small.jpg");
+  });
+
+  it("falls back to the first image when none is front or default-flagged", () => {
+    const url = extractImageUrl([
+      { perspective: "left", sizes: [{ size: "small", url: "https://kroger.example/only.jpg" }] },
+    ]);
+    expect(url).toBe("https://kroger.example/only.jpg");
+  });
+
+  it("falls back to the first available size when no preferred size matches", () => {
+    const url = extractImageUrl([
+      {
+        perspective: "front",
+        sizes: [{ size: "banana", url: "https://kroger.example/weird-size.jpg" }],
+      },
+    ]);
+    expect(url).toBe("https://kroger.example/weird-size.jpg");
+  });
+
+  it("returns undefined when images is undefined", () => {
+    expect(extractImageUrl(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined when images is an empty array", () => {
+    expect(extractImageUrl([])).toBeUndefined();
+  });
+
+  it("returns undefined when the chosen image has no sizes", () => {
+    expect(extractImageUrl([{ perspective: "front", sizes: [] }])).toBeUndefined();
   });
 });

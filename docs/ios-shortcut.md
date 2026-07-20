@@ -33,8 +33,9 @@ is a confirmation within 2 seconds of the share tap (Spec 1 §2.2).
   as of this session — also logs the browser you're viewing it in in
   automatically (it sets an HttpOnly auth cookie server-side in the same
   response, so there's no separate paste-it-back-in step for the browser).
-  The Shortcut still needs the raw value copied into its "Get device token"
-  step below, since a Shortcut can't read a cookie.
+  Keep this value handy — you'll paste it into the Shortcut's first-run
+  prompt (§3.2 below) the first time you run it on your device, since a
+  Shortcut can't read a browser cookie.
 
   A CLI fallback still exists if you have shell access to the machine
   running the API (`npm run cli -- create-device-token`, or `node
@@ -75,7 +76,57 @@ like "Add to RecipeCart".
    "Show in Share Sheet" is on — confirm it's configured for URLs and
    Text). This gives you a `Shortcut Input` variable to reference below.
 
-### 3.2 On-device TikTok validation (no network call)
+### 3.2 Get or prompt for the device token
+
+**This replaces the old design of pasting the token directly into the POST
+action's header field (buried three steps deep in an action's
+configuration).** Instead, the Shortcut remembers the token itself, across
+runs, using a small text file in iCloud Drive — the simplest "remember one
+string between runs" mechanism the Shortcuts app has without third-party
+actions. On the very first run (or if that file is ever missing/emptied),
+the Shortcut stops and asks the user to paste their token once, saves it,
+and only then continues; every run after that skips the prompt entirely.
+
+1. Add a **"Text"** action. Set its content to the fixed path
+   `Shortcuts/recipecart-token.txt`. Rename this action's output (tap the
+   "..." on the action → **Rename Variable**) to `Token File Path` so it's
+   easy to reference below.
+2. Add a **"Get File"** action.
+   - Tap the **File** parameter. Instead of browsing to a file, use the
+     variable-insertion control (the small icon in the input field) to
+     select the `Token File Path` variable from step 1 — this makes "Get
+     File" treat the text as an iCloud Drive path rather than opening a
+     file picker.
+   - Tap **"Show More"** and turn **OFF "Error if Not Found."** This is the
+     critical setting: on the first-ever run this file doesn't exist yet,
+     and without disabling this, the Shortcut would crash instead of
+     falling through to the prompt in step 4 below.
+   - Rename this action's output to `Stored Token File`.
+3. Add **"Get Text from Input"**, input = `Stored Token File`. Rename its
+   output to `Stored Token`. (If the file wasn't found in step 2, this
+   produces empty/no text — that's the signal the "If" below checks.)
+4. Add an **"If"** action on `Stored Token`, condition **"has any value"**.
+   - **If true (token already stored from a previous run):** add **"Set
+     Variable"**, name `Device Token`, value = `Stored Token`. Nothing else
+     to do in this branch — it falls through to 3.3 below with
+     `Device Token` populated and no prompt shown.
+   - **Otherwise (first run, or the stored file is missing/empty):**
+     a. Add **"Ask for Input"** — Input Type: **Text**, Prompt: **"Paste
+        your RecipeCart device token"** (the value from the `/setup` page,
+        §2 above).
+     b. Add **"Set Variable"**, name `Device Token`, value = the text just
+        entered in (a).
+     c. Add **"Save File"** — content = `Device Token`, path =
+        `Token File Path` (service: iCloud Drive), with **"Overwrite If
+        File Exists"** turned **ON**. This writes the freshly-entered token
+        back to disk so every future run finds it in step 2 and skips the
+        prompt.
+   - End the "If" block. Both branches now leave a populated `Device Token`
+     variable in scope, so everything below this point — including 3.3's
+     validation and 3.4's POST — is identical regardless of which branch
+     ran.
+
+### 3.3 On-device TikTok validation (no network call)
 
 Per Spec 1 §2.2: "local regex check for `tiktok.com` / `vm.tiktok.com` —
 non-TikTok links rejected on-device with a clear message, no backend call."
@@ -93,9 +144,9 @@ non-TikTok links rejected on-device with a clear message, no backend call."
      works with TikTok recipe videos." Then **"Stop This Shortcut"**. No
      network action should be reachable from this branch — that's the
      "no backend call" requirement.
-   - **If-true branch:** continue with 3.3 below.
+   - **If-true branch:** continue with 3.4 below.
 
-### 3.3 The POST request
+### 3.4 The POST request
 
 Confirmed request shape from `src/api/routes/recipes.ts` and
 `src/api/lib/dto.ts` (`SubmitRecipeRequest`):
@@ -109,7 +160,8 @@ Confirmed request shape from `src/api/routes/recipes.ts` and
     `"Bearer "` (capital B, one space), then falls back to a
     `recipecart_device_token` cookie. Shortcuts can't easily set cookies on
     a raw `Get Contents of URL` call, so **use the Bearer header**, not a
-    cookie.
+    cookie. The value is the `Device Token` variable set in §3.2 above —
+    **not** a literal pasted string typed into this field.
   - `Content-Type: application/json`
 - **Body (JSON):**
   ```json
@@ -124,13 +176,16 @@ Confirmed request shape from `src/api/routes/recipes.ts` and
 Build this with **"Get Contents of URL"**:
 1. URL: `<API_BASE_URL>/api/recipes`
 2. Method: `POST`
-3. Headers: add `Authorization` = `Bearer <paste-token-here>` (see §4 for
-   how the token gets into this field for distributed copies), and
-   `Content-Type` = `application/json`.
+3. Headers: add `Authorization` with value built as literal text `Bearer `
+   followed by the `Device Token` variable from §3.2 (use the
+   variable-insertion control to append it after typing `Bearer ` — do not
+   type or paste the token itself into this field; that's exactly the
+   buried-editing step this design replaces), and `Content-Type` =
+   `application/json`.
 4. Request Body: **JSON**, add a field `sourceUrl` whose value is the
-   matched text from step 3.2.
+   matched text from step 3.3.
 
-### 3.4 Handling the response
+### 3.5 Handling the response
 
 Confirmed response shape from `SubmitRecipeResponse` in `dto.ts` and the
 route handler:
@@ -186,39 +241,60 @@ ASR, or the Claude extraction call (those happen later in the worker
 process). If it's taking noticeably longer than 2s in testing, the
 bottleneck is network/DNS to the API host, not backend processing time.
 
-## 4. Pre-configured household Shortcut (single-household beta)
+## 4. Sharing the Shortcut (now token-less — one link works for everyone)
 
-Per Spec 1 A1-2's recommendation (and this session's decision to build
-both the web setup-page flow and this documented pre-configured path): for
-a small trusted household beta, it's simpler to build the Shortcut once,
-with the device token already pasted into the `Authorization` header field
-from §3.3, and share the finished Shortcut file rather than making every
-household member run the CLI and edit the Shortcut themselves.
+Because §3.2 moved token entry into a first-run prompt stored per-device in
+iCloud Drive, the Shortcut itself no longer contains anyone's token — it's
+generic. That's an improvement over the old design: previously, sharing the
+Shortcut meant sharing whatever raw token happened to be pasted into the
+header field at export time (see the superseded caveat below). Now, build
+it once, share the single iCloud link with the whole household, and each
+person who installs it gets prompted for their own copy of the token on
+their own first run — nobody has to open the Shortcut's actions or edit
+anything.
 
 **To distribute:**
 1. In the Shortcuts app, open the finished shortcut → tap the share icon →
    **"Share"** (not "Share Sheet" toggle — the actual iCloud share action).
 2. Choose **"Copy iCloud Link"**. This produces a URL that opens the
    Shortcuts app on any device it's sent to, showing an install/"Add
-   Shortcut" screen with the shortcut's actions already configured
-   (including whatever is typed into the header field).
-3. Send that link to other household members (Messages, AirDrop, etc.).
-   Each person taps it, reviews the actions Shortcuts shows them (iOS
-   shows a permissions/actions summary before allowing install), and taps
-   **"Add Shortcut"**.
+   Shortcut" screen with the shortcut's actions already configured.
+   Because §3.2's token file starts out missing on a fresh install, this
+   link is now safe to share broadly among trusted household members —
+   there is no secret baked into it.
+3. Paste that URL into the `SHORTCUT_ICLOUD_URL` constant in
+   `web/src/lib/shortcutConfig.ts` (see the comment there). Once set, the
+   `/setup` web page's "Add Shortcut to your device" button links straight
+   to it — no more manually sending the link over Messages/AirDrop, though
+   that still works too.
+4. Anyone installing it (via the button or a direct link) reviews the
+   actions Shortcuts shows them (iOS shows a permissions/actions summary
+   before allowing install), taps **"Add Shortcut,"** and is prompted for
+   their token on the very first run per §3.2.
 
-**Security caveat (do not skip this when distributing):** the raw device
-token is embedded in plain text inside the shared `.shortcut` artifact —
-anyone who receives the iCloud link can open the shortcut's actions and
-read the token directly out of the `Authorization` header field, and it
-also means every recipient is authenticating as the same single
-`DEFAULT_USER_ID` account (see §2's caveat — there's currently no
-per-person token). This distribution method is only appropriate for a
-small, trusted, single-household beta where everyone receiving the link is
-already trusted with account access. It is **not** appropriate for general
-/ public distribution — do not post the iCloud link anywhere public, and
-do not reuse this pattern once multi-user tokens exist without revisiting
-this doc.
+**Still true, and unaffected by this change:** there's currently only one
+device-token "slot" server-side (see §2's `DEFAULT_USER_ID` caveat) — every
+person who pastes a token in step 4 above is still authenticating as the
+same single account, and generating a new token via `/setup` invalidates
+whatever every other household member pasted in. This is a backend
+limitation the token-storage redesign in §3.2 doesn't (and isn't meant to)
+fix; it only removes the *plaintext-token-in-a-shared-file* problem, not
+the *single-account* one.
+
+<details>
+<summary>Superseded: the old baked-in-token distribution caveat (kept for
+history, no longer applicable)</summary>
+
+Previously, the Shortcut had the device token pasted directly into the
+`Authorization` header field, so the shared `.shortcut` artifact contained
+the token in plain text — anyone with the iCloud link could open the
+shortcut's actions and read it out directly, which meant the link itself
+was sensitive and had to be restricted to people already trusted with
+account access, never posted anywhere public. §3.2's first-run-prompt
+design removes this problem: the distributed Shortcut has no token in it
+at all.
+
+</details>
 
 **Versioning convention:** Spec 1 §7 notes "The Shortcut is a distribution
 artifact (an `.shortcut` file / iCloud link), so version it alongside the
@@ -227,11 +303,14 @@ exported from an iPhone that has built one, which this environment can't
 do). When someone does export one (Shortcuts app → share icon → "Export
 File" produces a `.shortcut` file), the convention going forward should be
 to commit it under a top-level `shortcuts/` directory (e.g.
-`shortcuts/recipecart-capture.shortcut`), named for what it does, with the
-device token **stripped/blanked** before committing (a `.shortcut` file is
-a binary plist — treat it like any other file that might carry a secret;
-never commit one with a live token baked in). This directory doesn't exist
-yet — this doc only records the convention for whoever does the export.
+`shortcuts/recipecart-capture.shortcut`), named for what it does. With the
+§3.2 redesign the exported file no longer has a live token baked into an
+action's fields (the token only ever lives in the per-device iCloud Drive
+file created at runtime), so this is lower-risk than it used to be — but
+still treat a `.shortcut` file (a binary plist) as something to skim
+before committing, in case a future edit reintroduces a hardcoded value.
+This directory doesn't exist yet — this doc only records the convention
+for whoever does the export.
 
 ## 5. Testing checklist
 
@@ -263,9 +342,20 @@ Mirrors Spec 1 §7 ("Setup" considerations) and blocker B1-3:
 - [ ] Confirm the "View progress" link actually opens the web app to the
       right recipe/job (`/recipes/<jobId>`) and that the web app is
       reachable from the phone (same LAN, or public URL once deployed).
+- [ ] **First-run prompt (§3.2):** delete/rename `recipecart-token.txt`
+      from iCloud Drive (or install fresh) and confirm the "Paste your
+      RecipeCart device token" prompt appears before anything else, and
+      that submitting a TikTok share afterward still succeeds using the
+      just-entered token.
+- [ ] **Token persistence (§3.2):** after the first run above, run the
+      Shortcut again (new share) and confirm the prompt does **not**
+      reappear — it should go straight to validation/POST using the
+      stored file.
 - [ ] If distributing via iCloud link (§4), have a second household
-      member's phone install it from the link and confirm it works with no
-      further configuration on their end.
+      member's phone install it from the link and confirm it prompts them
+      for their own token on their first run (not the token from whoever
+      built the original Shortcut) and works with no further
+      configuration after that.
 
 ## 6. Open questions / things this doc could not confirm from code
 

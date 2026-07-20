@@ -14,6 +14,15 @@ const TERMINAL_STATUSES = new Set([
   "expired",
 ]);
 
+// Cart-terminal statuses only (see src/kroger/cart_runner.ts's CartRunStatus)
+// — a real cart run finished, successfully or partially. These are the
+// "Done" / auto-archived recipes: nothing server-side changes, they're just
+// grouped out of the main view client-side so they don't clutter it, while
+// staying visible and linkable from the Done section. `failed` is NOT
+// included here — a failed job stays in the main list with its existing
+// FailureCard-linked treatment, since it never reached a cart outcome.
+const CART_DONE_STATUSES = new Set(["completed", "partially_completed"]);
+
 // Interim substitute for the iOS Shortcut (Phase 4) — Spec 4's Phase 3 exit
 // criteria explicitly allows "curl or a simple form" for submission, so this
 // form is spec-sanctioned, not a permanent product surface.
@@ -44,7 +53,24 @@ export default function RecipesList() {
     (item) => !TERMINAL_STATUSES.has(item.status),
   );
 
+  const activeRecipes = (recipes ?? []).filter(
+    (item) => !CART_DONE_STATUSES.has(item.status),
+  );
+  const doneRecipes = (recipes ?? []).filter((item) =>
+    CART_DONE_STATUSES.has(item.status),
+  );
+
   usePolling(fetchRecipes, { active: hasActiveJob });
+
+  const handleDeleted = useCallback(
+    (id: string) => {
+      setRecipes((prev) => (prev ? prev.filter((item) => item.id !== id) : prev));
+      // Re-sync with the server in the background in case anything else
+      // changed (e.g. dedup window state).
+      fetchRecipes();
+    },
+    [fetchRecipes],
+  );
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -138,11 +164,26 @@ export default function RecipesList() {
       )}
 
       {recipes !== null && recipes.length > 0 && (
-        <ul className="recipes-list__items">
-          {recipes.map((item) => (
-            <RecipeCard key={item.id} item={item} />
-          ))}
-        </ul>
+        <>
+          <ul className="recipes-list__items">
+            {activeRecipes.map((item) => (
+              <RecipeCard key={item.id} item={item} onDeleted={handleDeleted} />
+            ))}
+          </ul>
+
+          {doneRecipes.length > 0 && (
+            <details className="recipes-list__done" open={activeRecipes.length === 0}>
+              <summary className="recipes-list__done-summary">
+                Done ({doneRecipes.length})
+              </summary>
+              <ul className="recipes-list__items recipes-list__items--done">
+                {doneRecipes.map((item) => (
+                  <RecipeCard key={item.id} item={item} onDeleted={handleDeleted} />
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
       )}
     </main>
   );

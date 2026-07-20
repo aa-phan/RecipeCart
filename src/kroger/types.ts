@@ -38,6 +38,29 @@ export interface KrogerAisleLocation {
   number: string;
 }
 
+// Per Kroger's documented Products API shape, confirmed against a real live
+// `/products` call (2026-07-20, "heavy cream" @ locationId 03500529): each
+// product can carry multiple `images` entries (one per camera angle —
+// "front", "back", "left", "right"), each with its own `sizes` array
+// offering the same shot at several resolutions ("thumbnail", "small",
+// "medium", "large", "xlarge" — confirmed exact match). One correction from
+// the original unverified assumption: the "this is the primary shot" flag
+// is `featured: boolean` on the perspective entry (only ever seen set true
+// on "front" in the live sample), NOT `default` as first guessed — fixed
+// below. `images` itself is optional defensively: not every product in the
+// catalog has photography.
+export interface KrogerProductImageSize {
+  size: string;
+  url: string;
+}
+
+export interface KrogerProductImage {
+  id?: string;
+  perspective: string;
+  featured?: boolean;
+  sizes: KrogerProductImageSize[];
+}
+
 export interface KrogerProduct {
   productId: string;
   upc: string;
@@ -47,6 +70,7 @@ export interface KrogerProduct {
   categories: string[];
   aisleLocations: KrogerAisleLocation[];
   items: KrogerProductItem[];
+  images?: KrogerProductImage[];
 }
 
 export interface KrogerProductSearchResponse {

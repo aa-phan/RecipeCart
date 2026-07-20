@@ -5,8 +5,12 @@
 import crypto from "node:crypto";
 import { getDb } from "../../platform/database.js";
 import { notFound } from "../lib/errors.js";
-import type { IngredientDto, IngredientEditRequest } from "../lib/dto.js";
+import type { IngredientDto, IngredientEditRequest, MatchDto } from "../lib/dto.js";
 import type { EvidenceRef } from "../../pipeline/schema.js";
+import { rematchIngredient } from "../../matcher/index.js";
+import { loadStoreLocation } from "../../kroger/store_config.js";
+import { toMatchDto } from "./match_edits.js";
+import { logger } from "../../platform/logger.js";
 
 function toIngredientDto(row: {
   id: string;
@@ -28,15 +32,40 @@ function toIngredientDto(row: {
   };
 }
 
+/** Response shape for a successful (non-remove) `editIngredient` call: the
+ * updated ingredient, plus — only when the edit actually changed the
+ * quantity/unit and a re-match was run — the fresh `MatchDto` for that same
+ * ingredient, so the frontend can update one card's product dropdown
+ * without a full recipe reload. `match` is omitted (not merely undefined-y)
+ * when no re-match ran, e.g. a markOwned-only edit or a manually-added
+ * ingredient that was never matched in the first place. */
+export type IngredientEditResult = IngredientDto & { match?: MatchDto };
+
 /** Apply an edit to an existing ingredient: quantity fields (only those
  * present in the request), `markOwned` → `is_pantry_staple = true`, or a
  * `remove: true` delete (cascades to its product_match row via FK). Throws
  * `notFound("ingredient")` if the row doesn't exist (or was already removed
- * by this same call). */
+ * by this same call).
+ *
+ * Amount re-match (Phase 5 Slice 3): when the request actually changes
+ * `quantityValue` and/or `quantityUnit` (compared to the row's PRIOR
+ * values — a no-op edit that just re-sends the same amount doesn't trigger
+ * this), product matching is re-driven for this one ingredient so the
+ * picker reflects a product choice appropriate to the NEW amount rather
+ * than sitting inert. See `rematchIngredient`'s doc (matcher/index.ts) for
+ * why this deliberately does NOT preserve a prior user selection the way a
+ * routine staleness refresh does — the old selection was for a different
+ * quantity and may not even cover the new one. Degrades gracefully (edit
+ * still saved, `match` simply omitted) when there's no store configured yet
+ * or the ingredient has no existing product_matches row to begin with
+ * (manually-added ingredients start unmatched). A re-match failure (e.g.
+ * Kroger API outage) is logged and swallowed for the same reason — the
+ * user's amount edit must not be lost just because the live re-match
+ * couldn't complete. */
 export async function editIngredient(
   ingredientId: string,
   edit: IngredientEditRequest,
-): Promise<IngredientDto | null> {
+): Promise<IngredientEditResult | null> {
   const db = getDb();
 
   if (edit.remove) {
@@ -54,6 +83,15 @@ export async function editIngredient(
   if ("quantityUnit" in edit) patch.quantity_unit = edit.quantityUnit;
   if (edit.markOwned) patch.is_pantry_staple = true;
 
+  const quantityEdited = "quantityValue" in edit || "quantityUnit" in edit;
+  const before = quantityEdited
+    ? await db
+        .selectFrom("ingredients")
+        .select(["quantity_value", "quantity_unit"])
+        .where("id", "=", ingredientId)
+        .executeTakeFirst()
+    : undefined;
+
   const row =
     Object.keys(patch).length > 0
       ? await db
@@ -69,7 +107,40 @@ export async function editIngredient(
           .executeTakeFirst();
 
   if (!row) throw notFound("ingredient");
-  return toIngredientDto(row);
+  const dto = toIngredientDto(row);
+
+  const quantityActuallyChanged =
+    quantityEdited &&
+    before !== undefined &&
+    (before.quantity_value !== row.quantity_value || before.quantity_unit !== row.quantity_unit);
+  if (!quantityActuallyChanged) return dto;
+
+  const store = loadStoreLocation();
+  if (!store) return dto; // no store configured — nothing to match against yet
+
+  const hasExistingMatch = await db
+    .selectFrom("product_matches")
+    .select("id")
+    .where("ingredient_id", "=", ingredientId)
+    .executeTakeFirst();
+  if (!hasExistingMatch) return dto; // never matched (e.g. manual add) — nothing to re-drive
+
+  try {
+    await rematchIngredient(ingredientId, store.locationId);
+  } catch (err) {
+    logger.error("editIngredient: re-match after amount edit failed", {
+      ingredientId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return dto;
+  }
+
+  const matchRow = await db
+    .selectFrom("product_matches")
+    .selectAll()
+    .where("ingredient_id", "=", ingredientId)
+    .executeTakeFirst();
+  return matchRow ? { ...dto, match: toMatchDto(matchRow) } : dto;
 }
 
 /** Manually add an ingredient to a recipe. Per the Phase 3 plan's locked

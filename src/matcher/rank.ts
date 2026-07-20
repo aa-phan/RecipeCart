@@ -3,6 +3,7 @@
 // no external calls — Claude-delegated disambiguation and materiality are
 // explicitly deferred to P2 per spec.
 import type { Ingredient } from "../pipeline/schema.js";
+import type { KrogerProductImage } from "../kroger/types.js";
 import { normalizeUnit, parseSizeString, type UnitCategory } from "./units.js";
 import { densityForIngredient } from "./density.js";
 
@@ -193,4 +194,36 @@ export function computeUnitPrice(price: number, size: string): number | undefine
   const parsed = parseSizeString(size);
   if (!parsed || parsed.baseQuantity <= 0) return undefined;
   return price / parsed.baseQuantity;
+}
+
+// Smallest-first: a list/dropdown thumbnail should be as small as Kroger
+// offers, not a hero-sized image. Fall back down the list if a preferred
+// size isn't present for this particular image entry.
+const PREFERRED_IMAGE_SIZES = ["thumbnail", "small", "medium", "large", "xlarge"];
+
+/** Picks a thumbnail-appropriate image URL from a Kroger product's `images`
+ * array (Spec 3 §2.2 candidate display) — purely additive, display-only
+ * data, no effect on ranking/matching. Prefers the "front" perspective
+ * (falling back to whatever's marked `default`, then the first entry, since
+ * not every product guarantees a "front" shot), then the smallest available
+ * size for that image. Returns undefined rather than throwing whenever
+ * `images` is missing/empty or no entry has any sizes — many catalog items
+ * have no photography at all. */
+export function extractImageUrl(images: KrogerProductImage[] | undefined): string | undefined {
+  if (!images || images.length === 0) return undefined;
+
+  const chosenImage =
+    images.find((img) => img.perspective === "front") ??
+    images.find((img) => img.featured) ??
+    images[0]!;
+
+  if (!chosenImage.sizes || chosenImage.sizes.length === 0) return undefined;
+
+  for (const preferred of PREFERRED_IMAGE_SIZES) {
+    const match = chosenImage.sizes.find((s) => s.size === preferred);
+    if (match) return match.url;
+  }
+  // Unrecognized size labels only: still return something rather than
+  // silently dropping a valid image URL.
+  return chosenImage.sizes[0]!.url;
 }

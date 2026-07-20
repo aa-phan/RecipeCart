@@ -4,14 +4,14 @@ import { apiGet } from "../../api/client";
 import type { IngredientDto, MatchDto, RecipeDetailDto } from "../../api/types";
 import { usePolling } from "../../hooks/usePolling";
 import StageLine from "../../components/StageLine";
-import IngredientRow from "./IngredientRow";
-import MatchPicker from "./MatchPicker";
+import IngredientCard from "./IngredientCard";
 import ApproveButton from "./ApproveButton";
 import "./Review.css";
 
-// Integration note: `GET /api/recipes/:id` now returns `matches: MatchDto[]`
-// (added at the integration stage, keyed by `ingredientId`) — MatchPicker is
-// wired in below.
+// Integration note: `GET /api/recipes/:id` returns `matches: MatchDto[]`
+// keyed by `ingredientId` — each ingredient renders as one unified
+// IngredientCard combining the amount editor and the product picker
+// (Phase 5 Slice 3 redesign; previously two separate stacked sections).
 
 function parseSourceHandle(sourceUrl: string): string {
   try {
@@ -184,29 +184,18 @@ export default function Review() {
         {recipe.ingredients.map((ingredient) => {
           const match = recipe.matches.find((m) => m.ingredientId === ingredient.id);
           return (
-            <IngredientRow
+            <IngredientCard
               key={ingredient.id}
               recipeId={recipe.id}
               ingredient={ingredient}
-              onChange={handleIngredientChange}
-              onRemove={handleIngredientRemove}
+              match={match}
+              onIngredientChange={handleIngredientChange}
+              onIngredientRemove={handleIngredientRemove}
+              onMatchChange={handleMatchChange}
             />
           );
         })}
       </ul>
-
-      <div className="review__matches">
-        {recipe.ingredients.map((ingredient) => {
-          const match = recipe.matches.find((m) => m.ingredientId === ingredient.id);
-          if (!match || match.candidates.length === 0) return null;
-          return (
-            <div key={ingredient.id} className="review__match-block">
-              <p className="review__match-ingredient-name">{ingredient.canonicalName}</p>
-              <MatchPicker recipeId={recipe.id} match={match} onChange={handleMatchChange} />
-            </div>
-          );
-        })}
-      </div>
 
       {recipe.ingredients.length === 0 && (
         <p className="review__empty">No ingredients left — add one below or check the source video.</p>

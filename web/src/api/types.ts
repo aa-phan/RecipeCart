@@ -12,6 +12,7 @@ export type {
   SubmitRecipeRequest,
   SubmitRecipeResponse,
   IngredientEditRequest,
+  IngredientEditResponseDto,
   MatchEditRequest,
   PreferencesDto,
   EvidenceRef,

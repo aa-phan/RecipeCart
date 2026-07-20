@@ -91,6 +91,15 @@ export interface IngredientEditRequest {
   remove?: boolean;
 }
 
+/** Response for PATCH /:id/ingredients/:ingredientId (Phase 5 Slice 3 —
+ * amount edits re-drive product matching). `match` is present only when the
+ * edit actually changed quantityValue/quantityUnit AND a re-match ran
+ * (a store is configured and the ingredient already had a product_matches
+ * row) — see recipe_edits.ts's editIngredient doc for the full decision
+ * tree. Absent `match` does NOT mean the edit failed; it just means there's
+ * nothing new to show in the product picker for this edit. */
+export type IngredientEditResponseDto = IngredientDto & { match?: MatchDto };
+
 export interface MatchEditRequest {
   /** The chosen candidate's productId, or `null` meaning "skip this match". */
   selectedProductId?: string | null;

@@ -141,7 +141,13 @@ describe("cart routes", () => {
       const body = res.json();
       expect(body.status).toBe("completed");
       expect(body.results).toEqual([
-        { ingredientId: "ingredient-1", upc: CANDIDATE.upc, status: "added" },
+        {
+          ingredientId: "ingredient-1",
+          upc: CANDIDATE.upc,
+          status: "added",
+          productName: CANDIDATE.name,
+          price: CANDIDATE.price,
+        },
       ]);
       expect(addToCartMock).toHaveBeenCalledTimes(1);
       expect(addToCartMock).toHaveBeenCalledWith(CANDIDATE.upc, 1, "valid-access-token");
@@ -239,7 +245,13 @@ describe("cart routes", () => {
       const body = res.json();
       expect(body.status).toBe("completed");
       expect(body.results).toEqual([
-        { ingredientId: "ingredient-1", upc: CANDIDATE.upc, status: "added" },
+        {
+          ingredientId: "ingredient-1",
+          upc: CANDIDATE.upc,
+          status: "added",
+          productName: CANDIDATE.name,
+          price: CANDIDATE.price,
+        },
       ]);
     });
 

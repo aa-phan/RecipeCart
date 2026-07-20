@@ -14,6 +14,7 @@ import { logger } from "../platform/logger.js";
 import { config } from "../platform/config.js";
 import {
   computeUnitPrice,
+  extractImageUrl,
   quantityFitScore,
   textRelevanceScore,
   type QuantityFit,
@@ -286,6 +287,7 @@ async function searchAndBuildCandidates(
           brand: product.brand,
           price,
           size: item.size,
+          imageUrl: extractImageUrl(product.images),
           unitPrice,
           rankScore,
           reason: qFit?.note,
@@ -770,6 +772,45 @@ export async function refreshIfStale(
   return matchRecipeAndPersist(recipeId, locationId, options);
 }
 
+/** Re-runs matching for a SINGLE ingredient (e.g. the web Review screen's
+ * amount-edit flow re-driving product matching after a quantity/unit
+ * change) and persists the fresh result. Deliberately does NOT go through
+ * matchRecipeAndPersist's staleness-refresh path, because that path's
+ * persistMatch call is meant to preserve an existing user selection across
+ * a routine re-search (see persistMatch's onConflict comment) — correct
+ * when the ingredient itself hasn't changed, wrong here: an amount edit
+ * means the OLD selection was made for a DIFFERENT quantity and may no
+ * longer even cover the new one. So this deletes the ingredient's existing
+ * product_matches row first, forcing persistMatch's INSERT branch (rather
+ * than its UPDATE branch) to run, which applies the same
+ * auto-pre-select-if-confident rule a brand-new match gets. */
+export async function rematchIngredient(
+  ingredientId: string,
+  locationId: string,
+  options: MatchOptions = {},
+): Promise<IngredientMatch> {
+  const db = getDb();
+  const row = (await db
+    .selectFrom("ingredients")
+    .select(["id", "canonical_name", "quantity_value", "quantity_unit", "raw_text", "is_pantry_staple"])
+    .where("id", "=", ingredientId)
+    .executeTakeFirst()) as IngredientRow | undefined;
+  if (!row) throw new Error(`rematchIngredient: ingredient not found: ${ingredientId}`);
+
+  const token = await getAppToken();
+  const match = await matchIngredient(
+    ingredientFromDbRow(row),
+    row.id,
+    locationId,
+    token.access_token,
+  );
+  await applyMateriality([match], options);
+
+  await db.deleteFrom("product_matches").where("ingredient_id", "=", ingredientId).execute();
+  await persistMatch(match);
+  return match;
+}
+
 async function persistMatch(match: IngredientMatch): Promise<void> {
   const db = getDb();
   // product_matches.ingredient_id is UNIQUE (Postgres schema), so a single
@@ -778,18 +819,35 @@ async function persistMatch(match: IngredientMatch): Promise<void> {
   // booleans; updated_at is bumped to now() so the staleness check
   // (matchAgeMs → isMatchStale) sees a re-match as fresh.
   const candidatesJson = JSON.stringify(match.candidates);
+  // A confident match (requiresApproval === false) pre-selects its own top
+  // candidate — mirrors the CLI's `selectApprovedItems` behavior and the
+  // PRD's "high-confidence matches are pre-selected" requirement (Component
+  // 3 PRD §"Decisions"). Only a genuinely material/ambiguous match (flagged
+  // requiresApproval) is left unselected, forcing an explicit user choice.
+  // Previously this was unconditionally null/false for every match, which
+  // silently required the web reviewer to hand-pick every single ingredient
+  // — a real bug, not the intended zero-touch-when-confident UX.
+  const preSelectedProductId =
+    !match.requiresApproval && match.candidates.length > 0 ? match.candidates[0]!.productId : null;
+  const preApproved = preSelectedProductId !== null;
   await db
     .insertInto("product_matches")
     .values({
       id: randomUUID(),
       ingredient_id: match.ingredientId,
       candidates_json: candidatesJson,
-      selected_product_id: null,
+      selected_product_id: preSelectedProductId,
       requires_approval: match.requiresApproval,
       approval_reason: match.approvalReason ?? null,
-      is_approved: false,
+      is_approved: preApproved,
     })
     .onConflict((oc) =>
+      // Deliberately does NOT touch selected_product_id/is_approved on
+      // conflict (re-match, e.g. a stale-search refresh before cart
+      // approval) — a user's explicit manual selection must survive a
+      // re-match, and the initial auto-pre-selection above already handled
+      // the first-insert case. Only candidate data and the approval-required
+      // flag are refreshed.
       oc.column("ingredient_id").doUpdateSet({
         candidates_json: candidatesJson,
         requires_approval: match.requiresApproval,

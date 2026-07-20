@@ -34,15 +34,26 @@ export async function buildApprovedItems(recipeId: string): Promise<ApprovedCart
 
     // Fallback list mirrors the CLI's selectApprovedItems logic verbatim:
     // remaining candidates, in ranked order, tried only if Kroger's
-    // addToCart rejects the primary pick.
+    // addToCart rejects the primary pick. Each fallback carries its own
+    // display fields too — whichever one actually gets added is what the
+    // cart result screen should show, not the (rejected) top pick's data.
     const fallbacks = candidates
       .filter((c) => c.productId !== selected.productId)
-      .map((c) => ({ upc: c.upc, quantity: c.quantityToOrder ?? 1 }));
+      .map((c) => ({
+        upc: c.upc,
+        quantity: c.quantityToOrder ?? 1,
+        productName: c.name,
+        imageUrl: c.imageUrl,
+        price: c.price,
+      }));
 
     approved.push({
       upc: selected.upc,
       quantity: selected.quantityToOrder ?? 1,
       ingredientId: row.ingredient_id,
+      productName: selected.name,
+      imageUrl: selected.imageUrl,
+      price: selected.price,
       ...(fallbacks.length > 0 ? { fallbacks } : {}),
     });
   }

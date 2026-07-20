@@ -30,6 +30,15 @@ export interface CartItemResult {
   upc: string;
   status: "added" | "needs_attention";
   reason?: string;
+  // Display-only fields threaded through from the ProductCandidate that was
+  // approved for this item (see ApprovedCartItem below) — cart_runner itself
+  // never looks these up, it only carries them along. Undefined when the
+  // caller didn't have candidate data available (e.g. CLI's bare
+  // upc/quantity picks) — screens must fall back to showing the UPC, never
+  // crash on a missing name.
+  productName?: string;
+  imageUrl?: string;
+  price?: number | null;
 }
 
 export type CartRunStatus =
@@ -46,6 +55,13 @@ export interface ApprovedCartItem {
   upc: string;
   quantity: number;
   ingredientId?: string;
+  // Display-only, describing `upc`'s own ProductCandidate — see
+  // CartItemResult above for why these are optional/best-effort. Populated
+  // by buildApprovedItems (src/api/lib/cart_selection.ts) from the
+  // recipe's stored product_matches; not looked up again here.
+  productName?: string;
+  imageUrl?: string;
+  price?: number | null;
   // Next-best-ranked candidates to try, in order, ONLY when Kroger's
   // addToCart itself rejects `upc` (a real, detectable failure). This does
   // NOT help when Kroger accepts the add (204) for an item that later turns
@@ -56,7 +72,9 @@ export interface ApprovedCartItem {
   // endpoint at this tier — see module doc), so a silent accept-then-later-
   // unavailable case is invisible to this code entirely; this field only
   // improves the cases where Kroger DOES signal rejection at write time.
-  fallbacks?: { upc: string; quantity: number }[];
+  // Each fallback carries its own display fields (its own candidate), since
+  // whichever one actually gets added determines what the result should show.
+  fallbacks?: { upc: string; quantity: number; productName?: string; imageUrl?: string; price?: number | null }[];
 }
 
 // Small transient retry cap (Spec 3 §2.3 point 4) — only for fetch itself
@@ -269,11 +287,27 @@ async function addItemWithFallback(
   item: ApprovedCartItem,
   accessToken: string,
 ): Promise<
-  | { outcome: "added"; upc: string; usedFallback: boolean }
+  | {
+      outcome: "added";
+      upc: string;
+      usedFallback: boolean;
+      productName?: string;
+      imageUrl?: string;
+      price?: number | null;
+    }
   | { outcome: "needs_attention"; reason: string }
   | { outcome: "auth_failure"; reason: string }
 > {
-  const attempts = [{ upc: item.upc, quantity: item.quantity }, ...(item.fallbacks ?? [])];
+  const attempts = [
+    {
+      upc: item.upc,
+      quantity: item.quantity,
+      productName: item.productName,
+      imageUrl: item.imageUrl,
+      price: item.price,
+    },
+    ...(item.fallbacks ?? []),
+  ];
   const failureReasons: string[] = [];
 
   for (let i = 0; i < attempts.length; i++) {
@@ -289,7 +323,14 @@ async function addItemWithFallback(
           attemptIndex: i,
         });
       }
-      return { outcome: "added", upc: attempt.upc, usedFallback: i > 0 };
+      return {
+        outcome: "added",
+        upc: attempt.upc,
+        usedFallback: i > 0,
+        productName: attempt.productName,
+        imageUrl: attempt.imageUrl,
+        price: attempt.price,
+      };
     }
     if (outcome.outcome === "auth_failure") {
       return outcome;
@@ -328,6 +369,9 @@ async function processItems(
         ingredientId: item.ingredientId,
         upc: outcome.upc,
         status: "added",
+        productName: outcome.productName,
+        imageUrl: outcome.imageUrl,
+        price: outcome.price,
         ...(outcome.usedFallback
           ? { reason: `fallback candidate used — original pick (${item.upc}) was rejected` }
           : {}),
@@ -350,6 +394,12 @@ async function processItems(
       upc: item.upc,
       status: "needs_attention",
       reason: outcome.reason,
+      // Best-effort: the top pick's own candidate data, even though the add
+      // failed — still useful for the user to recognize which ingredient
+      // this was. Undefined when the caller had no candidate data at all.
+      productName: item.productName,
+      imageUrl: item.imageUrl,
+      price: item.price,
     });
   }
 
