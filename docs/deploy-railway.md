@@ -16,6 +16,51 @@ see `docs/ios-shortcut.md` — this doc stays server/Railway-side only.
 
 ---
 
+## ⚠️ Known open issue: worker ASR OOM on Railway (paused, not fixed)
+
+**Found 2026-07-20 via a real production job submission, not a theoretical
+concern.** The worker's local Whisper ASR transcription step
+(`src/pipeline/extract/asr.ts`) OOM-kills the worker process on Railway's
+default 1024MB memory limit — on every real job, including
+caption-sufficient ones, since ASR runs unconditionally regardless of the
+caption gate outcome (Spec 2 §2.1 — narration is needed for `steps` even
+when the caption alone covers ingredients).
+
+**Root cause, isolated with real measurements** (reproduced locally against
+real ~59s TikTok audio, not synthetic):
+- transformers.js's default dtype in Node.js is full `fp32` (only
+  auto-picks a quantized dtype for WASM/browser) — loading `whisper-base`
+  at fp32 alone costs **~930MB RSS**. **Fixed** in commit `cebea85`
+  (`dtype: "q8"`) — real, verified improvement, kept regardless of the
+  rest of this issue.
+- However, the memory cost is dominated by **inference** (the actual
+  `transcribe()` call), not model loading or precision. Real measurements:
+  - `whisper-base`, q8: load ~365-440MB, but **transcribe peaks ~2024MB**.
+  - `whisper-tiny`, q8: load ~440MB, but **transcribe still peaks ~1355MB**.
+  - Both exceed Railway's 1024MB worker limit. Model-size/precision swaps
+    alone do not fix this — the scaling appears tied to chunked-inference
+    memory (ONNX Runtime session/arena behavior across `chunk_length_s: 30`
+    chunks), not primarily model weight size.
+
+**Status: paused, not resolved** (explicit decision, 2026-07-20) — same
+posture as the project's earlier tabled self-hosted-LLM-reconciliation
+spike (`spec-2-tiktok-extraction.md` §2.5a): a real, measured constraint,
+not abandoned. Options identified but not yet pursued: (a) a larger Railway
+memory tier/plan for the worker service, (b) deeper ONNX Runtime session
+tuning (memory arena limits, smaller `chunk_length_s`, explicit
+inter-chunk cleanup) to try to bound peak memory without more RAM, (c)
+revisit whether local Whisper ASR is viable in this deployment's resource
+envelope at all.
+
+**Practical effect until resolved:** any real job submitted to production
+will OOM-crash the worker during ASR. The job fails cleanly (worker
+restarts via `restartPolicyType = "ON_FAILURE"`, doesn't corrupt state),
+but no job can currently reach `awaiting_review` in production. Local dev
+is unaffected (ample RAM). Don't re-attempt a full production
+end-to-end test until this is deliberately picked back up.
+
+---
+
 ## 0. Prerequisites
 
 - [ ] **Dockerfile build gate.** This repo's root `Dockerfile` layers
