@@ -51,7 +51,7 @@ const CANDIDATE = {
   quantityToOrder: 1,
 };
 
-async function seedRecipeWithApprovedMatch(): Promise<void> {
+async function seedRecipeWithApprovedMatch(opts: { withJobRow?: boolean } = {}): Promise<void> {
   const db = getDb();
   await db
     .insertInto("recipes")
@@ -63,6 +63,22 @@ async function seedRecipeWithApprovedMatch(): Promise<void> {
       recipe_json: JSON.stringify({}),
     })
     .execute();
+  if (opts.withJobRow) {
+    // recipeId === jobId by construction (see recipes.ts's header comment) —
+    // matches how a real job row looks once it reaches awaiting_review.
+    await db
+      .insertInto("jobs")
+      .values({
+        id: "recipe-1",
+        user_id: DEFAULT_USER_ID,
+        source_url: "https://example.com/recipe",
+        recipe_id: "recipe-1",
+        status: "awaiting_review",
+        stage: "awaiting_review",
+        idempotency_key: "seed-job-recipe-1",
+      })
+      .execute();
+  }
   await db
     .insertInto("ingredients")
     .values({
@@ -137,6 +153,30 @@ describe("cart routes", () => {
         .execute();
       expect(runs).toHaveLength(1);
       expect(runs[0]!.idempotency_key).toBe("idem-key-1");
+    });
+
+    it("updates the parent job's status to completed after a real cart run", async () => {
+      // Real bug, caught live 2026-07-20: runCartApproval only ever wrote
+      // to cart_runs — nothing updated the parent jobs row, so the web
+      // app's CartProgress screen (which polls GET /recipes/:id, i.e.
+      // jobs.status) kept showing "processing" forever even after the cart
+      // run genuinely finished.
+      await seedRecipeWithApprovedMatch({ withJobRow: true });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/recipes/recipe-1/cart:approve",
+        headers: { ...AUTH_HEADER, "idempotency-key": "idem-key-job-status" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().status).toBe("completed");
+
+      const job = await getDb()
+        .selectFrom("jobs")
+        .selectAll()
+        .where("id", "=", "recipe-1")
+        .executeTakeFirstOrThrow();
+      expect(job.status).toBe("completed");
+      expect(job.stage).toBe("completed");
     });
 
     it("replays the same result for a repeated idempotency key without re-adding", async () => {

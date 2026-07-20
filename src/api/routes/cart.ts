@@ -8,6 +8,7 @@ import type { CartResultDto } from "../lib/dto.js";
 import type { CartItemResult, CartRunStatus } from "../../kroger/cart_runner.js";
 import { runCartApproval } from "../../kroger/cart_runner.js";
 import { buildApprovedItems } from "../lib/cart_selection.js";
+import { finishJob } from "../../platform/jobs.js";
 
 export default async function cartRoutes(app: FastifyInstance): Promise<void> {
   // POST /recipes/:id/cart:approve — runs (or idempotently replays/resumes)
@@ -21,6 +22,17 @@ export default async function cartRoutes(app: FastifyInstance): Promise<void> {
     const recipeId = (request.params as { id: string }).id;
     const approvedItems = await buildApprovedItems(recipeId);
     const result = await runCartApproval(recipeId, approvedItems, idempotencyKey);
+
+    // Real bug, caught live 2026-07-20: runCartApproval only ever wrote to
+    // cart_runs — nothing updated the parent jobs row, so GET /recipes/:id
+    // (which the web app's CartProgress screen polls) kept reporting
+    // awaiting_review forever even after the cart run genuinely finished.
+    // CartRunStatus's values are identical strings to the matching
+    // JobStatusValue terminal states (completed/partially_completed/failed/
+    // requires_user_intervention) — recipeId === jobId always by
+    // construction (see recipes.ts's header comment), so this is the same
+    // finishJob() the worker's own state machine already uses.
+    await finishJob(recipeId, result.status);
 
     return { status: result.status, results: result.results } satisfies CartResultDto;
   });
