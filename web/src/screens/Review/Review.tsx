@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import { apiGet } from "../../api/client";
 import type { IngredientDto, MatchDto, RecipeDetailDto } from "../../api/types";
 import { usePolling } from "../../hooks/usePolling";
@@ -148,6 +148,18 @@ export default function Review() {
         </p>
       </main>
     );
+  }
+
+  // Real bug, caught live 2026-07-20: a genuinely failed extraction (zero
+  // ingredients ever created) fell through to the ingredient-review UI
+  // below, whose empty state ("No ingredients left — add one below") wrongly
+  // implies the fix is to add an ingredient, when actually nothing was ever
+  // extracted. FailureCard (a dedicated screen + /recipes/:id/failed route)
+  // already existed and is already used by CartProgress/ConnectKroger for
+  // their own failure paths — it was just never wired up here, the actual
+  // first place most extraction failures surface.
+  if (recipe.status === "failed") {
+    return <Navigate to={`/recipes/${recipe.id}/failed`} replace />;
   }
 
   const itemCount = recipe.ingredients.length;
