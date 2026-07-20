@@ -60,15 +60,18 @@ RUN apt-get update \
        python3 \
        python3-pip \
        ca-certificates \
+       util-linux \
     && pip3 install --no-cache-dir --break-system-packages yt-dlp \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user. DATA_DIR (default ./data, overridable) is where the worker
-# writes per-job temp media plus the tesseract/transformers model caches —
-# it must be owned by this user once a volume is mounted there (Railway
-# mounts volumes owned by root by default, so the worker service should set
-# DATA_DIR to a path this user can write, or the volume's mount permissions
-# need to allow it; see railway.json notes).
+# writes per-job temp media plus the tesseract/transformers model caches.
+# Railway mounts an attached volume owned by root regardless of the image's
+# USER — confirmed live in production (EACCES on every worker job before
+# this fix) — so this container starts as root and docker-entrypoint.sh
+# chowns the real runtime DATA_DIR before dropping to this user via
+# setpriv (util-linux, installed above). USER is deliberately NOT set here
+# anymore; see docker-entrypoint.sh.
 RUN groupadd --gid 1001 nodejs && useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home appuser
 
 WORKDIR /app
@@ -84,13 +87,18 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/web/dist ./web/dist
 
 RUN mkdir -p /app/data && chown -R appuser:nodejs /app
-USER appuser
+
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 # No EXPOSE needed for correctness (Railway detects the bound port via
 # PORT env var at runtime), but documents the api service's default for
 # humans reading this file. The worker service does not listen on any port.
 EXPOSE 3001
 
-# No CMD / ENTRYPOINT: Railway's per-service start command supplies one of
+# No CMD: Railway's per-service Custom Start Command supplies one of
 #   npm run start:api      (node dist/api/index.js)
 #   npm run start:worker   (node dist/worker/index.js)
+# as this ENTRYPOINT's argv — see docker-entrypoint.sh for what it does
+# with them (chown the real runtime DATA_DIR, then exec as appuser).
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

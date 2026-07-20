@@ -332,10 +332,13 @@ URI updated in both places (Railway env var + Kroger dashboard).
   see section E below.
 - [ ] **Device-token issuance tested from a fresh Shortcut install.** Not
   yet run — needs a real iPhone, see `docs/ios-shortcut.md`.
-- [x] **Kroger OAuth2 authorization flow tested end-to-end against the
+- [ ] **Kroger OAuth2 authorization flow tested end-to-end against the
   production redirect URI.** `KROGER_REDIRECT_URI` (Railway env var) and the
-  Kroger developer dashboard's registered redirect URI both updated to
-  `https://recipecart-production.up.railway.app/api/kroger/auth/callback`.
+  Kroger developer dashboard's registered redirect URI are both updated to
+  `https://recipecart-production.up.railway.app/api/kroger/auth/callback` —
+  but the actual consent flow hasn't been run against production yet
+  (confirmed: `kroger_auth` table is empty). Redirect URI config and a
+  completed OAuth grant are two different things; don't conflate them.
 
 ---
 
