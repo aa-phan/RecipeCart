@@ -15,6 +15,7 @@ import { buildAuthUrl, randomState, exchangeCode } from "../../kroger/auth.js";
 import { saveToken } from "../../kroger/token_store.js";
 import { badRequest } from "../lib/errors.js";
 import { config } from "../../platform/config.js";
+import { logger } from "../../platform/logger.js";
 
 // CSRF `state` bookkeeping. A browser-redirect OAuth flow is stateless
 // across the round trip (the browser leaves and comes back later), so we
@@ -43,11 +44,36 @@ export default async function krogerAuthRoutes(app: FastifyInstance): Promise<vo
   });
 
   // GET /kroger/auth/callback — Kroger redirects the browser back here with
-  // `?code=` and `?state=`. Validate state (CSRF/replay guard), exchange the
-  // code for a token pair, persist it, then redirect into the SPA.
+  // `?code=` and `?state=` on success, or `?error=` (e.g. `access_denied`,
+  // no `code` at all) if the user declined consent. Validate state
+  // (CSRF/replay guard), exchange the code for a token pair, persist it,
+  // then redirect into the SPA. Every failure path below redirects back into
+  // the SPA (`/connect-kroger?error=...`) instead of throwing a raw JSON
+  // error — this is a full-page browser redirect flow, so a thrown
+  // badRequest/500 would strand the user on a bare JSON response with no way
+  // back into the app (the bug this route plugin was fixed for).
+  //
+  // Note on resumeRecipeId: ConnectKroger.tsx already stashes
+  // `?resumeRecipeId` into sessionStorage BEFORE the user ever clicks
+  // through to `/kroger/auth/start` (a plain `<a>` with no query params of
+  // its own), and sessionStorage survives the full same-tab OAuth redirect
+  // round trip. So there's no need for this route to thread resumeRecipeId
+  // through the `state` map itself — the client-side value already survives
+  // untouched all the way back to whichever `/connect-kroger?error=...`
+  // landing this callback redirects to.
   app.get("/kroger/auth/callback", { config: { skipAuth: true } }, async (request, reply) => {
-    const query = request.query as { code?: unknown; state?: unknown };
-    const { code, state } = query;
+    const query = request.query as { code?: unknown; state?: unknown; error?: unknown };
+    const { code, state, error } = query;
+
+    // Consume the state token (one-time use) up front, before either the
+    // error check or the success-path validation below re-reads it —
+    // isStateValid() deletes the entry on first lookup, so it must only be
+    // called once per request no matter which branch follows.
+    const stateWasValid = typeof state === "string" && state.trim().length > 0 && isStateValid(state);
+
+    if (typeof error === "string" && error.trim().length > 0) {
+      return reply.redirect(`${config.webAppUrl}/connect-kroger?error=denied`);
+    }
 
     if (typeof code !== "string" || code.trim().length === 0) {
       throw badRequest("code query parameter is required");
@@ -55,16 +81,25 @@ export default async function krogerAuthRoutes(app: FastifyInstance): Promise<vo
     if (typeof state !== "string" || state.trim().length === 0) {
       throw badRequest("state query parameter is required");
     }
-    if (!isStateValid(state)) {
+    if (!stateWasValid) {
       throw badRequest("state is missing, invalid, or expired");
     }
 
-    const token = await exchangeCode(code);
-    await saveToken({
-      accessToken: token.access_token,
-      refreshToken: token.refresh_token ?? "",
-      expiresAt: Date.now() + token.expires_in * 1000,
-    });
+    try {
+      const token = await exchangeCode(code);
+      await saveToken({
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token ?? "",
+        expiresAt: Date.now() + token.expires_in * 1000,
+      });
+    } catch (err) {
+      // Bad/expired code, or the token exchange itself failing — surface as
+      // a redirect back into the SPA, not an unhandled 500.
+      logger.warn("kroger_auth: code exchange or token save failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return reply.redirect(`${config.webAppUrl}/connect-kroger?error=exchange_failed`);
+    }
 
     // MUST be absolute: a relative path would resolve against this API
     // server's own origin, not the (possibly different-origin, e.g. local

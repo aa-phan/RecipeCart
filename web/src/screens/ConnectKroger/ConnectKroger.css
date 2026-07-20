@@ -1,0 +1,39 @@
+.connect-kroger {
+  max-width: 480px;
+  margin: 4rem auto;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.connect-kroger__message {
+  font-size: 1.1rem;
+  margin: 0 0 1.5rem;
+}
+
+.connect-kroger__error {
+  color: #8a1f11;
+  background: #fdecea;
+  border: 1px solid #f5c2bc;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 0 0 1.5rem;
+}
+
+.connect-kroger__action {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+}
+
+.connect-kroger__action:hover,
+.connect-kroger__action:focus-visible {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}

@@ -8,7 +8,7 @@ import type { CartResultDto } from "../lib/dto.js";
 import type { CartItemResult, CartRunStatus } from "../../kroger/cart_runner.js";
 import { runCartApproval } from "../../kroger/cart_runner.js";
 import { buildApprovedItems } from "../lib/cart_selection.js";
-import { finishJob } from "../../platform/jobs.js";
+import { finishJob, setRecipeFailureClass } from "../../platform/jobs.js";
 
 export default async function cartRoutes(app: FastifyInstance): Promise<void> {
   // POST /recipes/:id/cart:approve — runs (or idempotently replays/resumes)
@@ -33,6 +33,21 @@ export default async function cartRoutes(app: FastifyInstance): Promise<void> {
     // construction (see recipes.ts's header comment), so this is the same
     // finishJob() the worker's own state machine already uses.
     await finishJob(recipeId, result.status);
+
+    // Thread the auth-specific failure classification (if any) onto the
+    // `recipes` row so the web app's FailureCard can show the
+    // purpose-built kroger_not_connected/kroger_token_expired card instead
+    // of falling through to the generic fallback (Phase 5 Kroger
+    // connect/reconnect flow fix — see setRecipeFailureClass's doc for why
+    // this reuses the extraction pipeline's own failure_class mechanism).
+    // Always write (clearing to null when there's no auth failure this
+    // time) so a stale classification from a prior failed attempt doesn't
+    // linger after a later run succeeds.
+    await setRecipeFailureClass(
+      recipeId,
+      result.failureClass ?? null,
+      result.failureClass ? result.summary : null,
+    );
 
     return { status: result.status, results: result.results } satisfies CartResultDto;
   });

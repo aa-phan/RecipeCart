@@ -217,6 +217,79 @@ describe("cart routes", () => {
     });
   });
 
+  describe("failure_class persistence for Kroger auth failures", () => {
+    // Phase 5 Kroger connect/reconnect flow fix: runCartApproval's two
+    // internal "requires_user_intervention" branches (no token at all vs. a
+    // 401 mid-run) are now surfaced onto the `recipes` row's failure_class
+    // column, the same mechanism the extraction pipeline uses
+    // (src/pipeline/extract/index.ts's persistFailure), so
+    // web/src/lib/failureCards.ts's purpose-built kroger_* cards actually
+    // render instead of falling through to the generic fallback card.
+    it("persists kroger_not_connected when there's no stored Kroger token at all", async () => {
+      await seedRecipeWithApprovedMatch({ withJobRow: true });
+      loadTokenMock.mockReturnValue(null);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/recipes/recipe-1/cart:approve",
+        headers: { ...AUTH_HEADER, "idempotency-key": "idem-key-not-connected" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().status).toBe("requires_user_intervention");
+      expect(addToCartMock).not.toHaveBeenCalled();
+
+      const recipe = await getDb()
+        .selectFrom("recipes")
+        .selectAll()
+        .where("id", "=", "recipe-1")
+        .executeTakeFirstOrThrow();
+      expect(recipe.failure_class).toBe("kroger_not_connected");
+      expect(recipe.failure_reason).toBeTruthy();
+    });
+
+    it("persists kroger_token_expired when a stored token gets a 401 from Kroger mid-run", async () => {
+      await seedRecipeWithApprovedMatch({ withJobRow: true });
+      addToCartMock.mockResolvedValue({ ok: false, status: 401, reason: "invalid_token" });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/recipes/recipe-1/cart:approve",
+        headers: { ...AUTH_HEADER, "idempotency-key": "idem-key-expired" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().status).toBe("requires_user_intervention");
+      expect(addToCartMock).toHaveBeenCalledTimes(1);
+
+      const recipe = await getDb()
+        .selectFrom("recipes")
+        .selectAll()
+        .where("id", "=", "recipe-1")
+        .executeTakeFirstOrThrow();
+      expect(recipe.failure_class).toBe("kroger_token_expired");
+      expect(recipe.failure_reason).toBeTruthy();
+    });
+
+    it("does not persist a failure_class for an ordinary completed run", async () => {
+      await seedRecipeWithApprovedMatch({ withJobRow: true });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/recipes/recipe-1/cart:approve",
+        headers: { ...AUTH_HEADER, "idempotency-key": "idem-key-clean" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().status).toBe("completed");
+
+      const recipe = await getDb()
+        .selectFrom("recipes")
+        .selectAll()
+        .where("id", "=", "recipe-1")
+        .executeTakeFirstOrThrow();
+      expect(recipe.failure_class).toBeNull();
+      expect(recipe.failure_reason).toBeNull();
+    });
+  });
+
   describe("GET /api/recipes/:id/cart", () => {
     it("returns 404 before any approval has run", async () => {
       await seedRecipeWithApprovedMatch();

@@ -1,0 +1,62 @@
+.failure-card {
+  max-width: 480px;
+  margin: 4rem auto;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.failure-card__loading {
+  color: #555;
+}
+
+.failure-card__message {
+  font-size: 1.1rem;
+  margin: 0 0 1.5rem;
+}
+
+.failure-card__action {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border: 1px solid #2563eb;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.failure-card__action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.failure-card__action--link {
+  cursor: pointer;
+}
+
+.failure-card__error {
+  color: #8a1f11;
+  background: #fdecea;
+  border: 1px solid #f5c2bc;
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  margin: 1rem 0 0;
+}
+
+.failure-card__back {
+  margin-top: 2rem;
+}
+
+.failure-card__back a {
+  color: #2563eb;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.failure-card__back a:hover,
+.failure-card__back a:focus-visible {
+  text-decoration: underline;
+}

@@ -1,7 +1,42 @@
-import React, { Suspense } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import React, { Suspense, useEffect } from "react";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import AuthGate from "./auth/AuthGate";
 import AppShell from "./components/AppShell/AppShell";
+
+const KROGER_RESUME_STORAGE_KEY = "krogerConnectResumeRecipeId";
+
+/** Completes the Kroger connect/reconnect resume round trip (Phase 5 fix):
+ * the OAuth callback (src/api/routes/kroger_auth.ts) is server-side and
+ * can't see the client-only sessionStorage value ConnectKroger.tsx wrote
+ * before the redirect, so it always redirects to the generic
+ * `/?krogerConnected=true`. This effect picks that up on mount and, if a
+ * resume recipe id is stashed, navigates on to that recipe's Review screen
+ * (replacing history, not pushing, so the generic URL never sits in back
+ * history) and clears the key.
+ *
+ * Deliberately NOT an auto-triggered cart-approval — this project's
+ * established rule is that cart mutation is always an explicit user action.
+ * Landing on Review just lets the user re-tap "Add to cart" themselves;
+ * that POST is idempotent server-side and only re-attempts remaining
+ * items. */
+function useKrogerConnectResume(): void {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("krogerConnected") !== "true") return;
+
+    const resumeRecipeId = sessionStorage.getItem(KROGER_RESUME_STORAGE_KEY);
+    sessionStorage.removeItem(KROGER_RESUME_STORAGE_KEY);
+    if (resumeRecipeId) {
+      navigate(`/recipes/${resumeRecipeId}`, { replace: true });
+    }
+    // No resumeRecipeId stashed (e.g. a first-time connect with no prior
+    // FailureCard deep-link) — leave the user on whatever
+    // `/?krogerConnected=true` landed on; nothing else to do here.
+  }, [location.search, navigate]);
+}
 
 // This file OWNS the entire route table for the RecipeCart web SPA. No
 // screen-owning subagent should ever need to edit this file — each screen
@@ -33,6 +68,8 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  useKrogerConnectResume();
+
   return (
     <AuthGate>
       <Shell>

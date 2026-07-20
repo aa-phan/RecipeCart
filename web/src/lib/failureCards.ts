@@ -18,6 +18,12 @@ export type FailureClass =
 export interface FailureCard {
   message: string;
   recoveryAction: string;
+  /** When present, the recovery action is a plain navigation link built from
+   * this recipe's id (e.g. into `/connect-kroger`) instead of the default
+   * reprocess-POST action — see FailureCard.tsx, which renders a `<Link>`
+   * for these two kroger cards and a reprocess `<button>` for every other
+   * card. */
+  recoveryHref?: (recipeId: string) => string;
 }
 
 const FAILURE_CARDS: Record<FailureClass, FailureCard> = {
@@ -41,10 +47,14 @@ const FAILURE_CARDS: Record<FailureClass, FailureCard> = {
   kroger_not_connected: {
     message: "Your Kroger account isn't connected yet.",
     recoveryAction: "Connect your Kroger account to add items to a cart.",
+    recoveryHref: (recipeId) =>
+      `/connect-kroger?resumeRecipeId=${recipeId}&reason=kroger_not_connected`,
   },
   kroger_token_expired: {
     message: "Your Kroger connection has expired.",
     recoveryAction: "Reconnect your Kroger account.",
+    recoveryHref: (recipeId) =>
+      `/connect-kroger?resumeRecipeId=${recipeId}&reason=kroger_token_expired`,
   },
   cart_partially_failed: {
     message: "Some items couldn't be added to your cart.",

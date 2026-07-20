@@ -249,6 +249,33 @@ export async function finishJob(
   });
 }
 
+/** Persists (or clears) a `recipes` row's `failure_class`/`failure_reason`
+ * columns only — never touches `status`/`recipe_json`. This is the same pair
+ * of columns the extraction pipeline's own failure path writes
+ * (`persistFailure` in src/pipeline/extract/index.ts), reused here (Phase 5
+ * Kroger connect/reconnect flow fix) so a cart-run auth failure surfaces
+ * through the exact same `FailureCard` lookup (`web/src/lib/failureCards.ts`)
+ * as an extraction failure, rather than inventing a second mechanism. Unlike
+ * `persistFailure`, this always UPDATEs an existing row: cart approval only
+ * ever runs after extraction has already produced a `recipes` row, so there's
+ * nothing to upsert/insert here. Pass `null` for both to clear a stale value
+ * (e.g. a resumed cart run finally succeeds after the user reconnects). */
+export async function setRecipeFailureClass(
+  recipeId: string,
+  failureClass: string | null,
+  failureReason: string | null,
+): Promise<void> {
+  await getDb()
+    .updateTable("recipes")
+    .set({
+      failure_class: failureClass,
+      failure_reason: failureReason,
+      updated_at: sql`now()`,
+    })
+    .where("id", "=", recipeId)
+    .execute();
+}
+
 /** Requeue jobs whose worker died mid-stage (lock older than staleLockMs).
  * Re-runnable stages go back to `received`; a stale cart mutation is paused as
  * `requires_user_intervention` (never blindly re-run — Spec 3 §17). Returns the

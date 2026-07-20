@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiGet, apiPost } from "../../api/client";
 import type { RecipeDetailDto } from "../../api/types";
 import { failureCardFor } from "../../lib/failureCards";
+import "./FailureCard.css";
 
 // Spec 1 §16: exactly one plain-language card + one primary recovery
 // action. Never show raw errors, stack traces, or status codes. In
@@ -56,31 +57,34 @@ export default function FailureCard() {
 
   if (loading) {
     return (
-      <div style={{ maxWidth: 480, margin: "4rem auto", textAlign: "center" }}>
-        <p>Loading…</p>
+      <div className="failure-card">
+        <p className="failure-card__loading">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: 480, margin: "4rem auto", textAlign: "center" }}>
-      <p style={{ fontSize: "1.1rem", marginBottom: "1.5rem" }}>{card.message}</p>
-      <button
-        onClick={handleRecover}
-        disabled={reprocessing}
-        style={{
-          padding: "0.75rem 1.5rem",
-          fontSize: "1rem",
-          fontWeight: 600,
-          cursor: reprocessing ? "default" : "pointer",
-        }}
-      >
-        {reprocessing ? "Retrying…" : card.recoveryAction}
-      </button>
-      {error && (
-        <p style={{ color: "crimson", marginTop: "1rem" }}>{error}</p>
+    <div className="failure-card">
+      <p className="failure-card__message">{card.message}</p>
+      {card.recoveryHref && id ? (
+        // Kroger connect/reconnect cards navigate out to /connect-kroger
+        // rather than retrying a reprocess POST — there's nothing to
+        // reprocess, the recipe extraction already succeeded; only the
+        // Kroger connection needs fixing.
+        <Link to={card.recoveryHref(id)} className="failure-card__action failure-card__action--link">
+          {card.recoveryAction}
+        </Link>
+      ) : (
+        <button
+          onClick={handleRecover}
+          disabled={reprocessing}
+          className="failure-card__action"
+        >
+          {reprocessing ? "Retrying…" : card.recoveryAction}
+        </button>
       )}
-      <div style={{ marginTop: "2rem" }}>
+      {error && <p className="failure-card__error">{error}</p>}
+      <div className="failure-card__back">
         <Link to="/">Back to recipes</Link>
       </div>
     </div>

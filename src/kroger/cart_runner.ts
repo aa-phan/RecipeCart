@@ -44,11 +44,22 @@ export interface CartItemResult {
 export type CartRunStatus =
   "completed" | "partially_completed" | "failed" | "requires_user_intervention";
 
+/** Set ONLY when `status === "requires_user_intervention"`, distinguishing
+ * the two internal branches that produce that status (Phase 5 Kroger
+ * connect/reconnect flow fix): no token stored at all (`ensureValidUserToken`
+ * found nothing) vs. a token that WAS present but got rejected (401) by
+ * Kroger mid-run (expired/revoked). The web app keys its two purpose-built
+ * failure cards (`web/src/lib/failureCards.ts`) off these exact strings —
+ * see `src/api/routes/cart.ts` for where this gets persisted onto the
+ * `recipes` row. */
+export type CartAuthFailureClass = "kroger_not_connected" | "kroger_token_expired";
+
 export interface CartRunResult {
   jobId: string;
   status: CartRunStatus;
   results: CartItemResult[];
   summary: string;
+  failureClass?: CartAuthFailureClass;
 }
 
 export interface ApprovedCartItem {
@@ -455,6 +466,7 @@ async function resumeCartRun(
       status: "requires_user_intervention",
       results: alreadyAdded,
       summary: summarize("requires_user_intervention", alreadyAdded),
+      failureClass: "kroger_not_connected",
     };
   }
 
@@ -478,7 +490,13 @@ async function resumeCartRun(
     needsAttentionCount: merged.filter((r) => r.status === "needs_attention").length,
   });
 
-  return { jobId, status, results: merged, summary: summarize(status, merged) };
+  return {
+    jobId,
+    status,
+    results: merged,
+    summary: summarize(status, merged),
+    ...(authFailure ? { failureClass: "kroger_token_expired" as const } : {}),
+  };
 }
 
 /** Runs a human-approved cart addition for a recipe (Spec 3 §2.3). Never
@@ -533,7 +551,13 @@ export async function runCartApproval(
       jobId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { jobId, status, results, summary: summarize(status, results) };
+    return {
+      jobId,
+      status,
+      results,
+      summary: summarize(status, results),
+      failureClass: "kroger_not_connected",
+    };
   }
 
   // 3 & 4. Sequential add, with per-item transient retry.
@@ -552,5 +576,11 @@ export async function runCartApproval(
     needsAttentionCount: results.filter((r) => r.status === "needs_attention").length,
   });
 
-  return { jobId, status, results, summary: summarize(status, results) };
+  return {
+    jobId,
+    status,
+    results,
+    summary: summarize(status, results),
+    ...(authFailure ? { failureClass: "kroger_token_expired" as const } : {}),
+  };
 }
