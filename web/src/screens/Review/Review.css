@@ -98,12 +98,6 @@
   border-color: #f3c8c5;
 }
 
-.ingredient-card__raw-text {
-  color: #888;
-  font-size: 0.85em;
-  margin: 0.4rem 0 0;
-}
-
 .ingredient-card__error {
   color: #b3261e;
   font-size: 0.85em;

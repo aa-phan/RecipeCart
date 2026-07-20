@@ -157,10 +157,6 @@ export default function IngredientCard({
         </button>
       </div>
 
-      {ingredient.rawText && (
-        <p className="ingredient-card__raw-text">Original text: &ldquo;{ingredient.rawText}&rdquo;</p>
-      )}
-
       {showEvidence && <EvidenceSnippet evidence={ingredient.evidence} />}
 
       {error && (

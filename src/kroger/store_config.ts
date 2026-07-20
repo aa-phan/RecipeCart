@@ -21,8 +21,24 @@ export function saveStoreLocation(location: StoredStoreLocation): void {
   fs.writeFileSync(storeConfigPath(), JSON.stringify(location, null, 2));
 }
 
+/** Falls back to env vars when the local `store.json` file isn't present —
+ * real gap found 2026-07-20: the API service (unlike the worker) has no
+ * persistent volume/DATA_DIR on Railway, so any API-side caller of
+ * `loadStoreLocation` (e.g. the Review screen's amount-edit re-match)
+ * always saw a `null` store and silently no-op'd, even though the worker's
+ * own matching has a real store configured on its own volume. Same
+ * single-target-store value, just reachable from a container with no
+ * filesystem access to the worker's volume. */
 export function loadStoreLocation(): StoredStoreLocation | null {
   const p = storeConfigPath();
-  if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, "utf8")) as StoredStoreLocation;
+  if (fs.existsSync(p)) {
+    return JSON.parse(fs.readFileSync(p, "utf8")) as StoredStoreLocation;
+  }
+  const locationId = process.env.STORE_LOCATION_ID;
+  if (!locationId) return null;
+  return {
+    locationId,
+    name: process.env.STORE_NAME ?? "",
+    zipCode: process.env.STORE_ZIP_CODE ?? "",
+  };
 }
