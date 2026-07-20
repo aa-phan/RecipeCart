@@ -53,7 +53,15 @@ export async function apiPost<T>(
     method: "POST",
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      // Only set Content-Type when there's actually a body to describe.
+      // Real bug, caught live: Fastify's default JSON body parser rejects
+      // ANY request with `Content-Type: application/json` and an empty
+      // body ("Body cannot be empty when content-type is set to
+      // 'application/json'") — sending this header unconditionally broke
+      // every no-body POST (setup's device-token mint, cart:approve,
+      // reprocess) with a 500, not just the one that happened to get
+      // manually tested first.
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...extraHeaders,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
