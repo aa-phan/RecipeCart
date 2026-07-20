@@ -104,15 +104,15 @@ Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so 
 **Goal:** Everything the PRDs promise for the private beta that isn't on the critical path of the pipeline itself.
 
 **Scope** (Spec 1 `[P5]` sections, remaining items across specs):
-- Preferences screen (store-brand/organic/dietary toggles, pantry always-owned list) wired into ranking.
-- Privacy/Data screen; per-recipe delete and `DELETE /api/account/data` full wipe, verified end-to-end.
-- Reprocess action; duplicate-share "view existing or reprocess" flow; Kroger connect/reconnect (re-authorize) flows polished.
-- Accessibility pass: Dynamic Type, VoiceOver labels (confidence badges read aloud), 44pt targets, WCAG AA contrast.
-- Operational drills: kill the worker mid-job and confirm recovery; verify Postgres backup restore once and document it; confirm no secrets appear in logs with a real-token probe; TTL sweep verified.
+- ✅ Preferences screen (store-brand/organic/dietary toggles, pantry always-owned list) wired into ranking. Done 2026-07-20.
+- ✅ Privacy/Data screen; per-recipe delete and `DELETE /api/account/data` full wipe, verified end-to-end. Done.
+- ✅ Reprocess action; duplicate-share "view existing or reprocess" flow; Kroger connect/reconnect (re-authorize) flows polished. Done 2026-07-20.
+- ~~Accessibility pass: Dynamic Type, VoiceOver labels (confidence badges read aloud), 44pt targets, WCAG AA contrast.~~ **Explicitly deprioritized (2026-07-20) — open, non-blocking.** This is a hobby project with no ADA-compliance obligation; a full accessibility pass isn't worth the investment absent real user demand. Revisit if/when real usage or an actual accessibility need surfaces — this is the "documented, accepted exception" the exit criteria below already allows for, not a gap to silently work around.
+- Operational drills: kill the worker mid-job and confirm recovery (✅ already exercised for real during Phase 3 crash testing); verify Postgres backup restore once and document it (open); confirm no secrets appear in logs with a real-token probe (open); TTL sweep verified (✅ done — 1h sweep, confirmed working).
 - Walk all four PRDs' acceptance-criteria lists and record pass/fail.
 - Evaluate whether real usage justifies a Kroger Partner-tier application (removes daily rate limits, adds cart-read access — Spec 3 §25).
 
-**Exit criteria:** All PRD acceptance criteria pass or have a documented, accepted exception. First trusted testers invited.
+**Exit criteria:** All PRD acceptance criteria pass or have a documented, accepted exception (accessibility is now formally one — see above). First trusted testers invited.
 
 ---
 
