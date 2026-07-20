@@ -359,13 +359,19 @@ URI updated in both places (Railway env var + Kroger dashboard).
 - [x] **GitHub auto-deploy on main.** Confirmed via a real push: this exact
   checklist update was pushed to `main` and both services picked it up and
   redeployed automatically without any manual trigger.
-- [ ] **Worker volume attached; TTL sweep scheduled.** Volume attached and
-  confirmed (`RAILWAY_VOLUME_MOUNT_PATH=/data`). Sweep code is running (no
-  crash, quiet poll loop) but hasn't yet had anything to actually sweep — a
-  fresh volume and DB have nothing to trigger `sweepTempMedia`/
-  `expireStaleReviews` yet. Re-check the worker logs for
-  `"worker: temp-media sweep"` / `"worker: expired stale reviews"` after
-  real usage accumulates, or seed a stale row manually to force it.
+- [x] **Worker volume attached; TTL sweep scheduled.** Volume attached and
+  confirmed (`RAILWAY_VOLUME_MOUNT_PATH=/data`). A real incident forced a
+  real test of the mechanism: a burst of OOM crashes during testing filled
+  the 500MB volume to 100% (orphaned per-job temp dirs from `SIGKILL`
+  bypassing the normal cleanup), which the sweep's original 6h TTL was too
+  conservative to catch in time — lowered to 1h (commit `c456760`) after
+  manually cleaning up the same incident. `sweepTempMedia`/
+  `expireStaleReviews` are unit-tested (`src/worker/sweeps.test.ts`) against
+  the real 1h value, but **not yet directly observed firing on its own in
+  production logs** — every cleanup this session was a manual intervention
+  via SSH, not a live-caught automatic sweep. Worth watching the worker logs
+  for `"worker: temp-media sweep"` the next time debris accumulates and is
+  left alone long enough to sweep itself.
 - [ ] **Log redaction verified with a real token/key probe.** Verified at
   the unit-test level (`src/api/server.test.ts`, confirmed to actually fail
   without the fix) but not yet re-confirmed against Railway's live log
@@ -375,15 +381,21 @@ URI updated in both places (Railway env var + Kroger dashboard).
   interval, pointed at the production `/health` URL.
 - [ ] **Postgres manual restore tested once and documented.** Not yet run —
   see section E below.
-- [ ] **Device-token issuance tested from a fresh Shortcut install.** Not
-  yet run — needs a real iPhone, see `docs/ios-shortcut.md`.
-- [ ] **Kroger OAuth2 authorization flow tested end-to-end against the
-  production redirect URI.** `KROGER_REDIRECT_URI` (Railway env var) and the
-  Kroger developer dashboard's registered redirect URI are both updated to
-  `https://recipecart-production.up.railway.app/api/kroger/auth/callback` —
-  but the actual consent flow hasn't been run against production yet
-  (confirmed: `kroger_auth` table is empty). Redirect URI config and a
-  completed OAuth grant are two different things; don't conflate them.
+- [x] **Device-token issuance tested from a fresh Shortcut install.**
+  Genuinely done: a real Shortcut was built on a real iPhone per
+  `docs/ios-shortcut.md`, a device token was minted via `/setup` (which
+  also surfaced and fixed two real bugs along the way — an `apiPost`
+  Content-Type bug and a redundant dual-auth-flow UX issue), and real
+  TikTok URLs were submitted end-to-end through the share sheet.
+- [x] **Kroger OAuth2 authorization flow tested end-to-end against the
+  production redirect URI; only the token pair is persisted.** Genuinely
+  done: the real consent flow was completed against production
+  (`kroger_auth` has a real row with real encrypted access/refresh
+  tokens), and — beyond just connecting — that connection was actually
+  used for a real, successful `cart:approve` run (real `cart_runs` row,
+  `status: "completed"`), which also caught and fixed a real bug (the
+  parent job's status was never updated after a successful cart run,
+  commit `b3f8f89`).
 
 ---
 
