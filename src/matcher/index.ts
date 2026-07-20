@@ -22,6 +22,7 @@ import {
 import { isSeasoning } from "./seasonings.js";
 import { judgeMateriality, type MaterialityCase } from "./materiality.js";
 import type { IngredientMatch, ProductCandidate } from "./types.js";
+import type { PreferencesDto } from "../api/lib/dto.js";
 
 export type { IngredientMatch, ProductCandidate } from "./types.js";
 
@@ -115,6 +116,144 @@ function preparedPenalty(scoringName: string, description: string): number {
   return 0;
 }
 
+// Kroger private-label brand names (Phase 5: wiring the Preferences screen's
+// `storeBrandPreferred` into ranking). Case-insensitively matched against
+// `candidate.brand`. Not exhaustive — a reasonable starting set of Kroger's
+// own house brands; extend as more are confirmed live.
+const STORE_BRANDS = [
+  "kroger",
+  "private selection",
+  "simple truth",
+  "simple truth organic",
+  "heritage farm",
+];
+
+// Small, bounded keyword-conflict map for the fixed set of dietary tags the
+// Preferences screen actually offers — deliberately NOT arbitrary free-typed
+// tag matching (per design). Normalize the user's tag (lowercase/trim) before
+// lookup; an unrecognized tag is simply a no-op, never an error. Modeled on
+// PREPARED_KEYWORDS/preparedPenalty above: a keyword hit penalizes a
+// candidate's score for comparison purposes, it never hard-excludes it.
+const DIETARY_CONFLICTS: Record<string, string[]> = {
+  vegan: ["milk", "cheese", "egg", "honey", "butter", "cream", "yogurt", "gelatin", "whey"],
+  vegetarian: ["chicken", "beef", "pork", "turkey", "gelatin", "fish", "shrimp", "bacon"],
+  "gluten-free": ["wheat", "barley", "rye", "malt"],
+  "dairy-free": ["milk", "cheese", "cream", "butter", "yogurt", "whey"],
+};
+
+// Adjustment magnitudes are expressed in textScore units (same scale as
+// preparedPenalty's PREPARED_PENALTY, ~0-1.3 range) — see
+// applyPreferenceAdjustments's doc for how these get folded into both
+// textScore and rankScore consistently.
+const STORE_BRAND_BOOST = 0.4;
+const ORGANIC_BOOST = 0.3;
+const DIETARY_PENALTY = 0.6;
+
+function isStoreBrandCandidate(brand: string | undefined): boolean {
+  if (!brand) return false;
+  const b = brand.toLowerCase();
+  return STORE_BRANDS.some((sb) => b.includes(sb));
+}
+
+function isOrganicCandidate(description: string, categories: string[]): boolean {
+  if (description.toLowerCase().includes("organic")) return true;
+  return categories.some((c) => c.toLowerCase().includes("organic"));
+}
+
+/** Returns the first user dietary tag (normalized) whose conflict keyword
+ * list matches somewhere in `description`, or null when nothing conflicts —
+ * including when a tag isn't in DIETARY_CONFLICTS at all (unknown/free-typed
+ * tags are a no-op, never thrown on). */
+function dietaryConflictTag(description: string, dietaryTags: string[]): string | null {
+  const desc = description.toLowerCase();
+  for (const rawTag of dietaryTags) {
+    const tag = rawTag.trim().toLowerCase();
+    const keywords = DIETARY_CONFLICTS[tag];
+    if (!keywords) continue;
+    if (keywords.some((kw) => desc.includes(kw))) return tag;
+  }
+  return null;
+}
+
+/** Case-insensitive EXACT match against the user's `pantryAlwaysOwned` list
+ * (not substring — a bounded, predictable rule) — extends the same
+ * display-only `deprioritized` mechanism `ingredient.is_pantry_staple`
+ * already drives, per the design's "identical mechanism" decision. Zero
+ * ranking/candidate effect, same as is_pantry_staple. */
+function isPantryAlwaysOwned(canonicalName: string, pantryAlwaysOwned: string[] | undefined): boolean {
+  if (!pantryAlwaysOwned || pantryAlwaysOwned.length === 0) return false;
+  const name = canonicalName.trim().toLowerCase();
+  if (name.length === 0) return false;
+  return pantryAlwaysOwned.some((p) => p.trim().toLowerCase() === name);
+}
+
+/** Discrete preference-adjustment stage (Spec 3 §2.2's "→ user preference
+ * boosts/filters → unit price tiebreak"), applied to the built
+ * `ScoredCandidate[]` list BEFORE any of the three comparators run — kept as
+ * one contained stage rather than threading preferences separately into each
+ * comparator. Mutates each candidate's `textScore`/`rankScore` in place;
+ * `rankScore` gets adj*10 (not just adj) to stay proportional to
+ * `rankScore = textScore * 10 + qFit*3`, so the adjustment has the same
+ * relative weight whichever comparator ends up reading it.
+ *
+ * Store-brand and organic boosts are positive and unconditional (no safety
+ * check needed — a boost can only ever help a candidate the user said they
+ * prefer). The dietary conflict penalty is different: per the design's
+ * critical safety rule, it must never silently swap the winning candidate
+ * without flagging it. So this snapshots the would-be winner using ONLY the
+ * store/organic boosts (comparator run once on a shallow copy), then applies
+ * the dietary penalty and snapshots the REAL winner the same way. If the two
+ * winners differ, the dietary preference is what changed the pick — returns
+ * the conflicting tag so the caller can force requiresApproval. If nothing
+ * changes (the common case — default/empty preferences, or a dietary tag
+ * that just doesn't apply to any top candidate), returns undefined and
+ * nothing is flagged. */
+function applyPreferenceAdjustments(
+  scored: ScoredCandidate[],
+  preferences: PreferencesDto,
+  comparator: (a: ScoredCandidate, b: ScoredCandidate) => number,
+): string | undefined {
+  if (scored.length === 0) return undefined;
+
+  for (const s of scored) {
+    let boost = 0;
+    if (preferences.storeBrandPreferred && isStoreBrandCandidate(s.candidate.brand)) {
+      boost += STORE_BRAND_BOOST;
+    }
+    if (preferences.organicPreferred && isOrganicCandidate(s.candidate.name, s.categories)) {
+      boost += ORGANIC_BOOST;
+    }
+    if (boost !== 0) {
+      s.textScore += boost;
+      s.candidate.rankScore += boost * 10;
+    }
+  }
+
+  if (!preferences.dietaryTags || preferences.dietaryTags.length === 0) return undefined;
+
+  // Snapshot the winner with ONLY the boosts above applied — the baseline
+  // the dietary-penalty-caused-a-swap check compares against.
+  const winnerBeforeDietary = [...scored].sort(comparator)[0]!;
+
+  let anyDietaryConflict = false;
+  for (const s of scored) {
+    const tag = dietaryConflictTag(s.candidate.name, preferences.dietaryTags);
+    if (tag) {
+      anyDietaryConflict = true;
+      s.dietaryTagMatched = tag;
+      s.textScore -= DIETARY_PENALTY;
+      s.candidate.rankScore -= DIETARY_PENALTY * 10;
+    }
+  }
+  if (!anyDietaryConflict) return undefined;
+
+  const winnerAfterDietary = [...scored].sort(comparator)[0]!;
+  if (winnerBeforeDietary.candidate.productId !== winnerAfterDietary.candidate.productId) {
+    return winnerBeforeDietary.dietaryTagMatched;
+  }
+  return undefined;
+}
+
 function compareCandidates(a: ProductCandidate, b: ProductCandidate): number {
   const diff = b.rankScore - a.rankScore;
   if (Math.abs(diff) > 0.01) return diff;
@@ -156,6 +295,14 @@ interface ScoredCandidate {
   // materiality judgment is [P2], not something this deterministic ranking
   // can safely decide on its own).
   fromBroadenedSearch: boolean;
+  // Kroger's raw product categories (e.g. ["Dairy"]) — carried through only
+  // for the organic-preference check (isOrganicCandidate); NOT part of the
+  // exported ProductCandidate/DTO surface, since the web app has no use for
+  // it.
+  categories: string[];
+  // Set by applyPreferenceAdjustments when this candidate's description
+  // conflicts with one of the user's dietary tags — undefined otherwise.
+  dietaryTagMatched?: string;
 }
 
 interface BroadenedSearch {
@@ -296,6 +443,7 @@ async function searchAndBuildCandidates(
         qFit,
         textScore,
         fromBroadenedSearch,
+        categories: product.categories,
       });
     }
   }
@@ -368,6 +516,7 @@ export async function matchIngredient(
   ingredientId: string,
   locationId: string,
   appToken: string,
+  options: MatchOptions = {},
 ): Promise<IngredientMatch> {
   // canonical_name_en.value can be null when extraction couldn't confidently
   // name the ingredient (Spec 2 §evidencedField) — fall back to raw_text
@@ -396,7 +545,9 @@ export async function matchIngredient(
       candidates: [],
       requiresApproval: true,
       approvalReason: "no ingredient name available to search on",
-      deprioritized: ingredient.is_pantry_staple,
+      deprioritized:
+        ingredient.is_pantry_staple ||
+        isPantryAlwaysOwned(ingredient.raw_text, options.preferences?.pantryAlwaysOwned),
     };
   }
 
@@ -469,7 +620,9 @@ export async function matchIngredient(
       candidates: [],
       requiresApproval: true,
       approvalReason: `product search failed: ${err instanceof Error ? err.message : String(err)}`,
-      deprioritized: ingredient.is_pantry_staple,
+      deprioritized:
+        ingredient.is_pantry_staple ||
+        isPantryAlwaysOwned(canonicalName, options.preferences?.pantryAlwaysOwned),
     };
   }
 
@@ -481,13 +634,23 @@ export async function matchIngredient(
   const hasUsableQuantityFit = scored.some((s) => s.qFit !== null);
   const useQuantityCoverage = !useSmallestPackageDefault && hasUsableQuantityFit;
 
-  if (useSmallestPackageDefault) {
-    scored.sort(compareByRelevanceThenPrice);
-  } else if (useQuantityCoverage) {
-    scored.sort(compareByQuantityCoverage);
-  } else {
-    scored.sort((a, b) => compareCandidates(a.candidate, b.candidate));
+  const comparator: (a: ScoredCandidate, b: ScoredCandidate) => number = useSmallestPackageDefault
+    ? compareByRelevanceThenPrice
+    : useQuantityCoverage
+      ? compareByQuantityCoverage
+      : (a, b) => compareCandidates(a.candidate, b.candidate);
+
+  // Discrete preference-adjustment stage (store-brand/organic boosts, dietary
+  // conflict penalty) — runs BEFORE the comparator sorts below, so all three
+  // ranking paths see the same adjusted scores. No-op (byte-identical
+  // ordering to before this feature existed) when options.preferences is
+  // undefined, or present but at its all-false/empty defaults.
+  let dietaryOverrideTag: string | undefined;
+  if (options.preferences) {
+    dietaryOverrideTag = applyPreferenceAdjustments(scored, options.preferences, comparator);
   }
+
+  scored.sort(comparator);
   scored = scored.slice(0, MAX_CANDIDATES);
   const candidates = scored.map((s) => s.candidate);
 
@@ -566,6 +729,19 @@ export async function matchIngredient(
     }
   }
 
+  // Dietary-conflict safety rule (design decision #2): the penalty in
+  // applyPreferenceAdjustments only returns a tag here when it actually
+  // CHANGED the winning candidate versus what would have won without it — the
+  // common "penalty didn't matter" case returns undefined and nothing is
+  // flagged. Deliberately does NOT set substitutionCase — this isn't a
+  // materiality question the Claude pass should judge/clear, it's a direct
+  // consequence of the user's own saved dietary preference.
+  if (dietaryOverrideTag) {
+    requiresApproval = true;
+    const note = `Deprioritized for your "${dietaryOverrideTag}" preference — showing an alternative`;
+    approvalReason = approvalReason ? `${approvalReason}; ${note}` : note;
+  }
+
   if (nameUncertain) {
     requiresApproval = true;
     const note = "ingredient name uncertain from extraction (matched on raw text)";
@@ -583,7 +759,9 @@ export async function matchIngredient(
     candidates,
     requiresApproval,
     approvalReason,
-    deprioritized: ingredient.is_pantry_staple,
+    deprioritized:
+      ingredient.is_pantry_staple ||
+      isPantryAlwaysOwned(canonicalName, options.preferences?.pantryAlwaysOwned),
     substitutionCase,
   };
 }
@@ -594,6 +772,16 @@ export interface MatchOptions {
    * reconcile's --mock passthrough — for zero-cost local testing of the rest
    * of the pipeline. Real runs should NOT set this. */
   skipMateriality?: boolean;
+  /** The user's saved Preferences-screen settings (Phase 5: wiring
+   * preferences into ranking) — store-brand/organic boosts, dietary-conflict
+   * penalty, and the pantryAlwaysOwned display flag all key off this. Callers
+   * fetch it themselves (same single-slot DEFAULT_USER_ID pattern as
+   * loadStoreLocation) — matcher/index.ts has no DB/route dependency of its
+   * own beyond what it already has. Omitted (undefined) entirely — not just
+   * "all false/empty" — skips the preference-adjustment stage outright, so
+   * existing callers that don't pass it see byte-identical behavior to
+   * before this feature existed. */
+  preferences?: PreferencesDto;
 }
 
 /** Recipe-level post-pass (Spec 3 §2.2 "Claude-delegated judgments"): collects
@@ -655,7 +843,9 @@ export async function matchRecipe(
   for (let i = 0; i < ingredients.length; i++) {
     const ingredient = ingredients[i]!;
     const ingredientId = `ing-${i}`;
-    results.push(await matchIngredient(ingredient, ingredientId, locationId, token.access_token));
+    results.push(
+      await matchIngredient(ingredient, ingredientId, locationId, token.access_token, options),
+    );
   }
   return applyMateriality(results, options);
 }
@@ -707,6 +897,7 @@ export async function matchRecipeAndPersist(
       row.id,
       locationId,
       token.access_token,
+      options,
     );
     results.push(match);
   }
@@ -803,6 +994,7 @@ export async function rematchIngredient(
     row.id,
     locationId,
     token.access_token,
+    options,
   );
   await applyMateriality([match], options);
 

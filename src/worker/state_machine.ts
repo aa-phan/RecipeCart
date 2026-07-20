@@ -16,6 +16,7 @@ import { extract } from "../pipeline/extract/index.js";
 import { ExtractionError } from "../pipeline/extract/failures.js";
 import { matchRecipeAndPersist } from "../matcher/index.js";
 import { loadStoreLocation } from "../kroger/store_config.js";
+import { loadPreferences } from "../api/routes/preferences.js";
 import { setStage, finishJob, heartbeat, JobStatus, type Job } from "../platform/jobs.js";
 
 /** Runs one claimed job through extraction + matching to `awaiting_review` (or
@@ -62,7 +63,11 @@ export async function runJob(job: Job, workerId: string): Promise<void> {
     }
 
     await setStage(jobId, JobStatus.MatchingProducts, { recipeId });
-    await matchRecipeAndPersist(recipeId, store.locationId);
+    // Same single-slot fetch pattern as loadStoreLocation above, just backed
+    // by the `preferences` table instead of a local file — wires the
+    // Preferences screen's saved settings into ranking (Phase 5).
+    const preferences = await loadPreferences();
+    await matchRecipeAndPersist(recipeId, store.locationId, { preferences });
 
     await finishJob(jobId, JobStatus.AwaitingReview, { recipeId });
     logger.info("worker: job reached awaiting_review", { jobId, recipeId });

@@ -9,6 +9,7 @@ import type { IngredientDto, IngredientEditRequest, MatchDto } from "../lib/dto.
 import type { EvidenceRef } from "../../pipeline/schema.js";
 import { rematchIngredient } from "../../matcher/index.js";
 import { loadStoreLocation } from "../../kroger/store_config.js";
+import { loadPreferences } from "../routes/preferences.js";
 import { toMatchDto } from "./match_edits.js";
 import { logger } from "../../platform/logger.js";
 
@@ -126,7 +127,10 @@ export async function editIngredient(
   if (!hasExistingMatch) return dto; // never matched (e.g. manual add) — nothing to re-drive
 
   try {
-    await rematchIngredient(ingredientId, store.locationId);
+    // Same single-slot fetch pattern as loadStoreLocation above — wires the
+    // Preferences screen's saved settings into this re-match too (Phase 5).
+    const preferences = await loadPreferences();
+    await rematchIngredient(ingredientId, store.locationId, { preferences });
   } catch (err) {
     logger.error("editIngredient: re-match after amount edit failed", {
       ingredientId,

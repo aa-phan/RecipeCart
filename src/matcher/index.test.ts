@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { Ingredient } from "../pipeline/schema.js";
 import type { KrogerProduct, KrogerProductSearchResponse } from "../kroger/types.js";
+import type { PreferencesDto } from "../api/lib/dto.js";
 import { getDb } from "../platform/database.js";
 import { resetDb } from "../platform/test-db.js";
 
@@ -881,6 +882,240 @@ describe("matchIngredient", () => {
     expect(result.requiresApproval).toBe(false);
     expect(result.candidates[0]!.productId).toBe("big");
     expect(result.candidates[0]!.reason).toMatch(/seasoning/);
+  });
+});
+
+describe("preference-adjustment stage (Phase 5: Preferences screen wiring)", () => {
+  const defaultPreferences: PreferencesDto = {
+    storeBrandPreferred: false,
+    organicPreferred: false,
+    dietaryTags: [],
+    pantryAlwaysOwned: [],
+  };
+
+  // No-quantity ingredient (useSmallestPackageDefault path — relevance then
+  // price) keeps these tests independent of the quantity-coverage machinery;
+  // the preference-adjustment stage runs identically before whichever
+  // comparator ends up sorting.
+  function oliveOilIngredient(): Ingredient {
+    return ingredient({
+      canonical_name_en: { value: "olive oil", evidence: [{ source_type: "caption" }] },
+      raw_text: "some olive oil",
+      quantity: { value: null, unit: null, raw_text: "some olive oil" },
+    });
+  }
+
+  it("store-brand boost flips the winner to the Kroger-brand option when preferred", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "kroger-oil",
+          upc: "kroger-oil",
+          description: "Kroger Extra Virgin Olive Oil",
+          brand: "Kroger",
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 5.99 },
+              size: "16.9 fl oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+        product({
+          productId: "bertolli-oil",
+          upc: "bertolli-oil",
+          description: "Bertolli Extra Virgin Olive Oil",
+          brand: "Bertolli",
+          items: [
+            {
+              itemId: "2",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 4.99 },
+              size: "16.9 fl oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    // Without any preference, the two candidates tie on relevance (both are
+    // full "Extra Virgin Olive Oil" matches) so cheapest price wins — Bertolli.
+    const baseline = await matchIngredient(oliveOilIngredient(), "ing-1", "01100002", "tok");
+    expect(baseline.candidates[0]!.productId).toBe("bertolli-oil");
+
+    const withPref = await matchIngredient(oliveOilIngredient(), "ing-1", "01100002", "tok", {
+      preferences: { ...defaultPreferences, storeBrandPreferred: true },
+    });
+    expect(withPref.candidates[0]!.productId).toBe("kroger-oil");
+  });
+
+  it("organic boost flips the winner to the organic option when preferred", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [
+        product({
+          productId: "organic-oil",
+          upc: "organic-oil",
+          description: "Naturally Preferred Organic Extra Virgin Olive Oil",
+          brand: "Naturally Preferred",
+          categories: ["Organic", "Oils"],
+          items: [
+            {
+              itemId: "1",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 6.99 },
+              size: "16.9 fl oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+        product({
+          productId: "bertolli-oil",
+          upc: "bertolli-oil",
+          description: "Bertolli Extra Virgin Olive Oil",
+          brand: "Bertolli",
+          items: [
+            {
+              itemId: "2",
+              fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+              price: { regular: 4.99 },
+              size: "16.9 fl oz",
+              soldBy: "UNIT",
+            },
+          ],
+        }),
+      ],
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const baseline = await matchIngredient(oliveOilIngredient(), "ing-1", "01100002", "tok");
+    expect(baseline.candidates[0]!.productId).toBe("bertolli-oil");
+
+    const withPref = await matchIngredient(oliveOilIngredient(), "ing-1", "01100002", "tok", {
+      preferences: { ...defaultPreferences, organicPreferred: true },
+    });
+    expect(withPref.candidates[0]!.productId).toBe("organic-oil");
+  });
+
+  function brothIngredient(): Ingredient {
+    return ingredient({
+      canonical_name_en: { value: "broth", evidence: [{ source_type: "caption" }] },
+      raw_text: "some broth",
+      quantity: { value: null, unit: null, raw_text: "some broth" },
+    });
+  }
+
+  function brothProducts(): KrogerProduct[] {
+    return [
+      product({
+        productId: "chicken-broth",
+        upc: "chicken-broth",
+        description: "Swanson Chicken Broth",
+        brand: "Swanson",
+        items: [
+          {
+            itemId: "1",
+            fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+            price: { regular: 2.99 },
+            size: "32 fl oz",
+            soldBy: "UNIT",
+          },
+        ],
+      }),
+      product({
+        productId: "veg-broth",
+        upc: "veg-broth",
+        description: "Kroger Vegetable Broth",
+        brand: "Kroger",
+        items: [
+          {
+            itemId: "2",
+            fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+            price: { regular: 3.99 },
+            size: "32 fl oz",
+            soldBy: "UNIT",
+          },
+        ],
+      }),
+    ];
+  }
+
+  it("a genuinely conflicting dietary tag deprioritizes the conflicting candidate and forces approval when it changes the winner", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: brothProducts(),
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    // Baseline (no dietary tag): both tie on relevance, cheaper chicken broth
+    // wins on price.
+    const baseline = await matchIngredient(brothIngredient(), "ing-1", "01100002", "tok");
+    expect(baseline.candidates[0]!.productId).toBe("chicken-broth");
+    expect(baseline.requiresApproval).toBe(false);
+
+    const withVegetarian = await matchIngredient(brothIngredient(), "ing-1", "01100002", "tok", {
+      preferences: { ...defaultPreferences, dietaryTags: ["vegetarian"] },
+    });
+    expect(withVegetarian.candidates[0]!.productId).toBe("veg-broth");
+    expect(withVegetarian.requiresApproval).toBe(true);
+    expect(withVegetarian.approvalReason).toMatch(/vegetarian/);
+  });
+
+  it("a non-conflicting dietary tag changes nothing", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: brothProducts(),
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const withGlutenFree = await matchIngredient(brothIngredient(), "ing-1", "01100002", "tok", {
+      preferences: { ...defaultPreferences, dietaryTags: ["gluten-free"] },
+    });
+    expect(withGlutenFree.candidates[0]!.productId).toBe("chicken-broth");
+    expect(withGlutenFree.requiresApproval).toBe(false);
+  });
+
+  it("pantryAlwaysOwned sets deprioritized=true with zero candidate/ranking change", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [product()],
+      meta: { pagination: { start: 0, limit: 10, total: 1 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const baseline = await matchIngredient(ingredient(), "ing-1", "01100002", "tok");
+    expect(baseline.deprioritized).toBe(false);
+
+    const withPantry = await matchIngredient(ingredient(), "ing-1", "01100002", "tok", {
+      preferences: { ...defaultPreferences, pantryAlwaysOwned: ["Heavy Cream"] },
+    });
+    expect(withPantry.deprioritized).toBe(true);
+    // Candidate list/ordering must be untouched — display-only flag.
+    expect(withPantry.candidates).toEqual(baseline.candidates);
+    expect(withPantry.requiresApproval).toBe(baseline.requiresApproval);
+  });
+
+  it("default/empty preferences produce byte-identical candidate ordering to not passing preferences at all", async () => {
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: brothProducts(),
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const withoutOptions = await matchIngredient(brothIngredient(), "ing-1", "01100002", "tok");
+
+    (searchProducts as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: brothProducts(),
+      meta: { pagination: { start: 0, limit: 10, total: 2 } },
+    } satisfies KrogerProductSearchResponse);
+
+    const withDefaultPreferences = await matchIngredient(
+      brothIngredient(),
+      "ing-1",
+      "01100002",
+      "tok",
+      { preferences: defaultPreferences },
+    );
+
+    expect(withDefaultPreferences).toEqual(withoutOptions);
   });
 });
 

@@ -3,11 +3,11 @@
 // lib/auth.ts). Intentionally stub-level: the Preferences screen is a stub
 // for this slice, so a correct working CRUD endpoint is sufficient.
 import type { FastifyInstance } from "fastify";
-import { getDb } from "../../platform/database.js";
+import { getDb, DEFAULT_USER_ID } from "../../platform/database.js";
 import type { PreferencesDto } from "../lib/dto.js";
 import { badRequest } from "../lib/errors.js";
 
-const DEFAULT_PREFERENCES: PreferencesDto = {
+export const DEFAULT_PREFERENCES: PreferencesDto = {
   storeBrandPreferred: false,
   organicPreferred: false,
   dietaryTags: [],
@@ -28,16 +28,27 @@ function toDto(row: {
   };
 }
 
+/** Shared single-slot fetch (same pattern as device tokens/store
+ * location/kroger_auth — one row per user, `DEFAULT_USER_ID` in this
+ * single-household MVP) — used by the GET route below AND by matcher
+ * call sites (worker/state_machine.ts, recipe_edits.ts) that need to feed a
+ * user's saved preferences into product-matching/ranking. Falls back to
+ * `DEFAULT_PREFERENCES` (all false/empty) when no row exists yet, exactly
+ * like the GET route always has. */
+export async function loadPreferences(userId: string = DEFAULT_USER_ID): Promise<PreferencesDto> {
+  const row = await getDb()
+    .selectFrom("preferences")
+    .selectAll()
+    .where("user_id", "=", userId)
+    .executeTakeFirst();
+
+  if (!row) return DEFAULT_PREFERENCES;
+  return toDto(row);
+}
+
 export default async function preferencesRoutes(app: FastifyInstance): Promise<void> {
   app.get("/preferences", async (request) => {
-    const row = await getDb()
-      .selectFrom("preferences")
-      .selectAll()
-      .where("user_id", "=", request.userId)
-      .executeTakeFirst();
-
-    if (!row) return DEFAULT_PREFERENCES;
-    return toDto(row);
+    return loadPreferences(request.userId);
   });
 
   app.patch("/preferences", async (request) => {
