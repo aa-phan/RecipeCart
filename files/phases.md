@@ -116,6 +116,47 @@ Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so 
 
 ---
 
+## Phase 6 — Visual Design
+
+**Status: scoped, not yet implemented (2026-07-20).** Full design detail (exact token values,
+type scale, spacing ladder, receipt-treatment spec, wordmark approach) lives in
+`files/specs/spec-5-visual-design.md` — this section is the phase-level summary only, mirroring
+Phases 1–5.
+
+**Goal:** A real, considered visual identity for the web app — not fixing broken UX (Phase 5's
+job), but replacing ad-hoc, screen-by-screen CSS with a single deliberate design system.
+Added 2026-07-20 after an audit of `web/src/**/*.css` found zero shared tokens, 3 drifting
+"error" reds and 3 drifting "success" greens for the same semantic role, no dark mode, no
+type scale (an `em`/`rem` unit mismatch between screens), two screens shipping with zero CSS
+at all, and placeholder-grade PWA icons with no favicon or wordmark.
+
+**Scope** (Spec 5, all sections `[P6]`):
+- A token system (`web/src/styles/tokens.css`): a named identity palette (Ink/Ink Muted/
+  Paper/Cart Blue/Basil/Border) plus status colors, with real light AND dark values —
+  `:root[data-theme="dark"]` + `@media (prefers-color-scheme: dark)`, a light/dark/system
+  toggle added to the Preferences screen.
+- A real display/body type pairing (Fraunces + Karla, self-hosted via `@fontsource`) and a
+  consistent rem-based type scale, replacing the current all-system-font, `em`/`rem`-mixed
+  approach.
+- A disciplined 4px/0.25rem spacing ladder, replacing off-grid one-off values.
+- Every screen and shared component (`ConfidenceBadge`, `StageLine`) migrated onto the token
+  system; the two currently-unstyled screens (`ConnectKroger`, `FailureCard`) get real
+  treatment for the first time.
+- One deliberate signature moment, confined to a single screen: a grocery-receipt-styled
+  treatment on the Cart Result confirmation screen (perforated card edge, dotted-leader item
+  rows, display-face pricing, a total line) — everywhere else stays quiet/disciplined.
+- A typographic wordmark for "RecipeCart" in the nav (no illustrated logo mark) and a real
+  favicon/monogram replacing the current near-empty placeholder PWA icons.
+- A WCAG AA contrast validation pass on every token pairing, in both light and dark — narrower
+  than Phase 5's full accessibility item (Dynamic Type/VoiceOver/44pt targets stay Phase 5
+  scope), but ensures the new palette doesn't hand that later pass a non-compliant baseline.
+
+**Exit criteria:** Every screen renders from the token system (zero raw hex literals left in
+screen CSS), both light and dark themes render correctly across every screen, the Cart Result
+signature treatment is live, and every token color pairing passes WCAG AA contrast.
+
+---
+
 ## Cross-phase gates: action items that must be resolved before each phase
 
 | Before phase | Must be decided/confirmed (see spec action-item IDs) |
