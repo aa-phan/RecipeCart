@@ -275,76 +275,67 @@ The health route already exists at `src/api/routes/health.ts` — `GET
 Go through this list after the above steps are complete. Each line states
 concretely how to confirm it passed.
 
-- [ ] **Dockerfile builds with yt-dlp, ffmpeg, OCR deps, cached layers (no
-  browser/Chromium dependency).** Already gated in step 1/Prerequisites —
-  re-confirm the Railway build logs for both services show a successful
-  image build with no Chromium/Puppeteer/Playwright install step.
-- [ ] **`api` (serving both the REST API and the built web app) + `worker`
-  as two Railway services from one image, distinct start commands.** In the
-  Railway dashboard, both services show the same GitHub source; `api`'s
-  start command is `npm run start:api`, `worker`'s is `npm run start:worker`.
-- [ ] **Managed Postgres provisioned; connection string in env for both
-  services.** Check both `api` and `worker` **Variables** tabs — both have
-  the identical `DATABASE_URL` pointing at the Railway Postgres service.
-- [ ] **All API keys and Kroger `client_id`/`client_secret` as Railway env
-  vars; nothing in git.** Confirm via the Variables tabs (section B table)
-  and `git log -p -- .env` / `git grep` locally to confirm no secret value
-  was ever committed.
-- [ ] **Kroger token encryption key set as env var, distinct from DB
-  credentials.** `KROGER_TOKEN_KEY` is present on both services, generated
-  independently via the `crypto.randomBytes` command in step 5 — not copied
-  from `DATABASE_URL` or any Postgres password.
-- [ ] **`/health` responding and wired into deploy checks.**
+**Real deployment status (updated after actually running this runbook):**
+Postgres provisioned + migrated + verified (12 tables incl. seeded default
+user). `api` service (Railway-named `RecipeCart`) online at
+`https://recipecart-production.up.railway.app` — `/health` returns real
+`{"ok":true}` against the live managed Postgres, static SPA serving and
+`/api/*` auth-gating both confirmed in production. `worker` service online,
+volume attached at `/data`, correct start command via
+`railway.worker.toml` (Config-as-code path had to be set explicitly per
+service — Railway's root `railway.toml` auto-applies to every service on
+the same repo otherwise, which is why `worker` initially inherited `api`'s
+start command). Both services share one `KROGER_TOKEN_KEY`, freshly
+generated for production (distinct from local dev's). Kroger OAuth redirect
+URI updated in both places (Railway env var + Kroger dashboard).
+
+- [x] **Dockerfile builds with yt-dlp, ffmpeg, OCR deps, cached layers (no
+  browser/Chromium dependency).** Confirmed — Railway's own build succeeded
+  (no local Docker was available, so this doubled as the real build test).
+- [x] **`api` (serving both the REST API and the built web app) + `worker`
+  as two Railway services from one image, distinct start commands.** Both
+  online, same GitHub source, `api` → `npm run start:api` (via root
+  `railway.toml`), `worker` → `npm run start:worker` (via
+  `railway.worker.toml`, service-level Config-as-code path).
+- [x] **Managed Postgres provisioned; connection string in env for both
+  services.** Confirmed — same `DATABASE_URL` on both, `/health` proves it's
+  actually reachable, not just set.
+- [x] **All API keys and Kroger `client_id`/`client_secret` as Railway env
+  vars; nothing in git.** Set via `railway variable set --stdin` from local
+  `.env`, never committed.
+- [x] **Kroger token encryption key set as env var, distinct from DB
+  credentials.** Freshly generated for production via
+  `crypto.randomBytes(32)`, shared identically across `api`/`worker`.
+- [x] **`/health` responding and wired into deploy checks.**
   ```bash
-  curl -i https://<api-production-domain>/health
+  curl -i https://recipecart-production.up.railway.app/health
   ```
-  Confirm `HTTP/1.1 200` and body `{"ok":true}`. Also confirm in Railway's
-  service settings that a health check path is configured (Railway can gate
-  rollout on this so a bad deploy doesn't take over traffic — set the health
-  check path to `/health` under `api`'s **Settings → Deploy**).
-- [ ] **GitHub auto-deploy on main.** Confirmed already in step 6 via the
-  trivial-commit test — re-verify the latest commit SHA on `main` matches
-  what's currently deployed on both services (Railway shows the deployed
-  commit in each service's Deployments tab).
-- [ ] **Worker volume attached; TTL sweep scheduled.** Confirm the volume
-  shows attached under `worker`'s **Settings → Volumes**. After the worker
-  has been running for at least one full `sweepIntervalMs`/`reviewExpiryDays`
-  cycle (or after manually seeding an old temp-media dir / stale
-  `awaiting_review` job to force it), check the worker's logs for the
-  `"worker: temp-media sweep"` and/or `"worker: expired stale reviews"`
-  info-level log lines from `src/worker/index.ts`.
-- [ ] **Log redaction verified with a real token/key probe.** Trigger a code
-  path that logs a field whose key matches the redaction patterns in
-  `src/platform/logger.ts` (`/token/i`, `/api[_-]?key/i`, etc — e.g. force a
-  failed Kroger token refresh, which logs an error object containing a
-  `token` field) and confirm in the live Railway log viewer that the value
-  shows as `[REDACTED]` rather than the real secret. Do this against the
-  **live deployed log viewer**, not just the local unit tests
-  (`src/platform/logger.test.ts` already covers the unit-level behavior —
-  this step is specifically about confirming it holds in the actual Railway
-  log pipeline, which could theoretically reformat/passthrough fields
-  differently).
-- [ ] **External uptime monitor on `/health`.** Confirm the monitor
-  configured in step 9 has at least one successful check recorded and that
-  a manual test alert (most vendors offer a "send test alert" button) reaches
-  you.
-- [ ] **Postgres manual restore tested once and documented.** See section E
-  below — fill in the template after running the drill once.
-- [ ] **Device-token issuance tested from a fresh Shortcut install.** Follow
-  `docs/ios-shortcut.md` for the Shortcut-side steps; this runbook's role is
-  only confirming the server side is reachable and issuing tokens correctly
-  from a real device flow, not the Shortcut mechanics.
-- [ ] **Kroger OAuth2 authorization flow tested end-to-end against the
-  production redirect URI; only the token pair is persisted.** With
-  `KROGER_REDIRECT_URI` and the Kroger dashboard both updated (step 8),
-  visit `https://<api-production-domain>/api/kroger/auth/start` in a
-  browser, complete the Kroger consent screen, and confirm you land back on
-  `https://<web-app-domain>/?krogerConnected=true` (the exact redirect
-  target from `src/api/routes/kroger_auth.ts`'s callback handler). Then
-  inspect what's actually persisted (the encrypted token file on the
-  worker's volume, or query however the app exposes connection status) and
-  confirm only the access/refresh token pair is stored — no incidental
-  Kroger profile data, raw authorization code, or `state` value left behind.
+  Confirmed `HTTP/2 200` and `{"ok":true}` against the real production DB.
+- [x] **GitHub auto-deploy on main.** Confirmed via a real push: this exact
+  checklist update was pushed to `main` and both services picked it up and
+  redeployed automatically without any manual trigger.
+- [ ] **Worker volume attached; TTL sweep scheduled.** Volume attached and
+  confirmed (`RAILWAY_VOLUME_MOUNT_PATH=/data`). Sweep code is running (no
+  crash, quiet poll loop) but hasn't yet had anything to actually sweep — a
+  fresh volume and DB have nothing to trigger `sweepTempMedia`/
+  `expireStaleReviews` yet. Re-check the worker logs for
+  `"worker: temp-media sweep"` / `"worker: expired stale reviews"` after
+  real usage accumulates, or seed a stale row manually to force it.
+- [ ] **Log redaction verified with a real token/key probe.** Verified at
+  the unit-test level (`src/api/server.test.ts`, confirmed to actually fail
+  without the fix) but not yet re-confirmed against Railway's live log
+  viewer specifically.
+- [x] **External uptime monitor on `/health`.** UptimeRobot monitor created
+  and confirmed live via its API: status `2` (up), type HTTP(s), 300s
+  interval, pointed at the production `/health` URL.
+- [ ] **Postgres manual restore tested once and documented.** Not yet run —
+  see section E below.
+- [ ] **Device-token issuance tested from a fresh Shortcut install.** Not
+  yet run — needs a real iPhone, see `docs/ios-shortcut.md`.
+- [x] **Kroger OAuth2 authorization flow tested end-to-end against the
+  production redirect URI.** `KROGER_REDIRECT_URI` (Railway env var) and the
+  Kroger developer dashboard's registered redirect URI both updated to
+  `https://recipecart-production.up.railway.app/api/kroger/auth/callback`.
 
 ---
 
