@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { getDb } from "../../platform/database.js";
 import { resetDb } from "../../platform/test-db.js";
+import { config } from "../../platform/config.js";
 
 // Full orchestrator test: every stage is mocked so this exercises only the
 // wiring/branching in index.ts (caption-gate branch selection, cleanup
@@ -224,6 +225,42 @@ describe("extract (orchestrator)", () => {
     expect(reconcileMock).toHaveBeenCalledWith(
       expect.objectContaining({ escalationFramePaths: ["/tmp/job-dir/frames/frame-001.jpg"] }),
     );
+  });
+
+  // 2026-07-21 incident: config.extraction.asrEnabled is an additional,
+  // independent kill switch on top of the caption-sufficiency gate — real
+  // production measurements showed transcribeAudio() OOM-crashing the
+  // worker on every caption-insufficient job, not just an unlucky one, so
+  // this needs to be forceable off without relying on the caption gate.
+  it("skips ASR (but still runs OCR) when asrEnabled is false, even on the caption-insufficient path", async () => {
+    downloadMock.mockResolvedValue({
+      mediaFiles: ["/tmp/job-dir/media.mp4"],
+      infoJsonPath: "/tmp/job-dir/media.info.json",
+      info: { description: "no ingredient list here, just vibes", duration: 30 },
+    });
+    probeMock.mockResolvedValue({
+      durationS: 30,
+      hasAudio: true,
+      hasVideo: true,
+      isPhotoMode: false,
+    });
+    mediaSplitMock.mockResolvedValue({
+      audioPath: "/tmp/job-dir/audio.wav",
+      rawFramePaths: ["/tmp/job-dir/frames/frame-001.jpg"],
+    });
+    dedupFramesMock.mockResolvedValue(["/tmp/job-dir/frames/frame-001.jpg"]);
+    ocrFramesMock.mockResolvedValue([{ text: "2 cups flour", frame_ref: "f1", tag: "content" }]);
+    selectEscalationFramesMock.mockReturnValue(["/tmp/job-dir/frames/frame-001.jpg"]);
+
+    config.extraction.asrEnabled = false;
+    try {
+      await extract(SOURCE_URL, "job-asr-disabled");
+    } finally {
+      config.extraction.asrEnabled = true;
+    }
+
+    expect(transcribeAudioMock).not.toHaveBeenCalled();
+    expect(ocrFramesMock).toHaveBeenCalledWith(["/tmp/job-dir/frames/frame-001.jpg"]);
   });
 
   it("still calls cleanupTempDir when a stage throws", async () => {

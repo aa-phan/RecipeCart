@@ -10,6 +10,7 @@
 // 4), not something that can be skipped because reconcile or postprocess
 // threw partway through.
 import crypto from "node:crypto";
+import { config } from "../../platform/config.js";
 import { getDb } from "../../platform/database.js";
 import { tempDirFor, cleanupTempDir } from "../../platform/db.js";
 import { logger } from "../../platform/logger.js";
@@ -120,8 +121,14 @@ export async function extract(
     // exceeding the Railway worker's 1024MB limit — see the
     // recipecart-worker-asr-oom memory) on the common, caption-sufficient
     // path.
+    // config.extraction.asrEnabled is a separate, additional gate (2026-07-21
+    // incident response): the ASR OOM turned out to hit EVERY
+    // caption-insufficient job, not just an unlucky one, so this can force
+    // ASR off across the board (independent of captionSufficient) without a
+    // code change — see the config.ts comment for the full incident.
+    const runAsr = extractFrames && config.extraction.asrEnabled;
     const [asrSegments, ocrBlocks] = await Promise.all([
-      extractFrames ? transcribeAudio(splitResult.audioPath) : Promise.resolve([]),
+      runAsr ? transcribeAudio(splitResult.audioPath) : Promise.resolve([]),
       extractFrames ? ocrFrames(dedupedFramePaths) : Promise.resolve([]),
     ]);
 

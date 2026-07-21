@@ -67,6 +67,19 @@ export const config = {
   apiPort: Number(process.env.PORT ?? process.env.API_PORT ?? 3001),
 
   extraction: {
+    // Kill switch for local Whisper ASR (2026-07-21 incident response —
+    // see recipecart-worker-asr-oom memory / the recorded 03:00-04:52
+    // crash-loop). Real measurements showed transcribe() alone peaks
+    // ~1.3-2GB against real audio, reliably exceeding Railway's 1024MB
+    // worker limit — NOT a one-bad-video problem, ANY caption-insufficient
+    // job (which is the only path that calls transcribeAudio at all) OOMs
+    // the worker on first attempt. Defaults to enabled (matches prior
+    // behavior for local/dev); set ASR_ENABLED=false on the Railway worker
+    // service to disable in an environment without a code change. When
+    // disabled, caption-insufficient jobs still get OCR — they just lose
+    // the transcript (steps text and the OCR/caption-conflict tie-break;
+    // see the ASR-gating comment a few lines below in index.ts).
+    asrEnabled: process.env.ASR_ENABLED !== "false",
     // Caption-sufficiency gate (Spec 2 §2.3a, A2-7). Minimum distinct
     // ingredient-pattern lines in the caption before we skip frame
     // extraction + OCR entirely and treat the caption as the ingredients
