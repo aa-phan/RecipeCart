@@ -11,6 +11,14 @@
  */
 
 :root {
+  /* Lets the browser pick a matching UA rendering (native form-control
+   * chrome, scrollbars, autofill overlays) for whichever theme is active,
+   * instead of always assuming light — without this, text inputs render
+   * with a white background/UA autofill styling even under data-theme
+   *="dark" or a dark OS preference, since the browser has no signal that
+   * the page itself has gone dark. */
+  color-scheme: light dark;
+
   /* Identity palette (light) */
   --color-ink: #23201b;
   --color-ink-muted: #6b6558;
@@ -66,6 +74,7 @@
 
 /* Explicit user choice: dark (wins over OS default) */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --color-ink: #eae6dd;
   --color-ink-muted: #a39b8a;
   --color-paper: #1b1815;
@@ -84,6 +93,12 @@
   --color-warning-bg: #3a2c14;
   --color-warning-border: #987530;
   --color-focus-ring: var(--color-cart-blue);
+}
+
+/* Explicit user choice: light (opts out of a dark OS preference, wins over
+ * the color-scheme: light dark default set on :root above). */
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 /* OS-level default: only applies when the user hasn't made an explicit

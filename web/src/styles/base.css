@@ -27,6 +27,25 @@ h3 {
   font-family: var(--font-display);
 }
 
+/* Text-entry form controls default to the browser's own (usually white,
+ * theme-unaware) widget styling, so they stayed white after switching to
+ * dark mode even though color-scheme is set on :root (tokens.css) — that
+ * property is a hint the UA is free to ignore for controls a page also
+ * styles itself. Explicit background/color/border here, sourced from the
+ * same tokens every other themed surface uses, makes text boxes track the
+ * theme reliably. Deliberately excludes checkbox/radio (native tick/dot
+ * chrome, not a themed surface) and buttons (styled per-component). */
+input:where([type="text"], [type="number"], [type="url"], [type="email"], [type="search"], [type="password"]),
+select,
+textarea {
+  color: var(--color-ink);
+  background: var(--color-paper-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+}
+
 /* Always-visible focus indicator — never color-only (WCAG "don't rely on
  * color alone", spec §2.7). Applies to every focusable element globally. */
 :focus-visible {
