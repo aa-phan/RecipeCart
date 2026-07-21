@@ -182,6 +182,143 @@ full accessibility item (Dynamic Type, VoiceOver labels, 44×44pt targets stay P
 a non-compliant starting point. Any token value that fails gets adjusted here, before Phase 5's
 broader accessibility work begins.
 
+#### 2.7 results — status colors, focus ring, real-usage spot-checks
+
+Real WCAG relative-luminance math (sRGB→linear, L, then `(L1+0.05)/(L2+0.05)`) computed
+against the actual current `tokens.css` hex values, 2026-07-20. Covers the status-color and
+focus-ring pairings; a parallel pass covers the identity-palette tokens (ink/paper/cart-blue/
+basil/border) separately — together the two passes are Slice 6 in full.
+
+**Status color / focus-ring pairings**
+
+| Pairing | Threshold | Light | Dark | Result |
+|---|---|---|---|---|
+| `--color-error` on `--color-error-bg` | 4.5:1 (renders at 12px/13px normal weight in body copy) | 5.72:1 | 4.52:1 | Pass both |
+| `--color-error-border` vs `--color-paper` | 3:1 (non-text/1.4.11) | was 1.44:1 (**fail**) → fixed to 3.74:1 | was 1.58:1 (**fail**) → fixed to 4.13:1 | Pass both (after fix) |
+| `--color-error-border` vs `--color-paper-raised` | 3:1 | was 1.55:1 (**fail**) → fixed to 4.05:1 | was 1.43:1 (**fail**) → fixed to 3.74:1 | Pass both (after fix) |
+| `--color-warning` on `--color-warning-bg` | 4.5:1 | 4.76:1 | 5.57:1 | Pass both |
+| `--color-warning-border` vs `--color-paper` | 3:1 | was 1.70:1 (**fail**) → fixed to 3.21:1 | was 2.00:1 (**fail**) → fixed to 4.14:1 | Pass both (after fix) |
+| `--color-warning-border` vs `--color-paper-raised` | 3:1 | was 1.83:1 (**fail**) → fixed to 3.47:1 | was 1.81:1 (**fail**) → fixed to 3.76:1 | Pass both (after fix) |
+| `--color-focus-ring` (= `--color-cart-blue`) vs `--color-paper` | 3:1 (2.4.11/1.4.11) | 4.71:1 | 5.60:1 | Pass both, untouched |
+| `--color-focus-ring` vs `--color-paper-raised` | 3:1 | 5.09:1 | 5.07:1 | Pass both, untouched |
+
+All four border pairings failed outright in both themes (borders were near-white-on-near-white
+tints, ~1.4–2.0:1) — these are genuine non-text-contrast failures, not edge cases. Fixed by
+increasing saturation/darkening (light) or brightening (dark) while keeping the same hue family,
+so error still reads red-toned and warning still reads amber-toned:
+
+- `--color-error-border`: light `#f5c2bc` → `#c85c52`; dark `#5c2e29` → `#c25b50`
+- `--color-warning-border`: light `#f0b429` → `#b57e08`; dark `#5c471f` → `#987530`
+
+`--color-error`/`--color-error-bg`/`--color-warning`/`--color-warning-bg` and the focus ring
+were untouched — all already passed.
+
+**Real-usage spot-checks**
+
+- `ConfidenceBadge.css` renders label text at `--text-xs` (12px) / `--weight-emphasis` (600).
+  12px bold does **not** qualify as WCAG "large text" (needs ~18.7px bold / 24px regular), so
+  the 4.5:1 text threshold applies, not 3:1:
+  - `--high` (basil-on-basil-bg): covered by the parallel identity-palette pass.
+  - `--medium`/`--amount-unclear` (`--color-warning` on `--color-warning-bg`): 4.76:1 light /
+    5.57:1 dark — pass (same token pairing as row above).
+  - `--low` (`--color-error` on `--color-error-bg`): 5.72:1 light / 4.52:1 dark — pass. Dark
+    mode is the tightest margin in this whole audit (4.52 vs. 4.5 threshold) — legitimate pass,
+    not rounding, but has near-zero headroom; worth a mental flag if `--color-error`/`-bg` dark
+    values ever shift again.
+  - Badge borders (all three modifiers) inherit the `-border` tokens fixed above, now passing.
+- `CartResult.css` `.cart-result__receipt-total-value`: `--color-ink` on `--color-paper-raised`
+  at `--text-xl` (28px) / `--weight-heading` (700) — genuinely large text, 3:1 threshold.
+  Recomputed independently: **15.98:1 light / 12.87:1 dark**. Matches the parallel agent's
+  12.87–15.98:1 exactly — no discrepancy.
+- Confirmed via `grep -rn "color-error\|color-warning" web/src --include="*.css"` that
+  `Privacy.css`, `Preferences.css`, `Setup.css`, `CartResult.css`, `RecipesList.css`,
+  `ConnectKroger.css`, `FailureCard.css`, `Review.css`, and `CartProgress.css` all consume the
+  shared `--color-error`/`-bg`/`-border` and `--color-warning`/`-bg`/`-border` tokens (no raw
+  hex leftovers found), so the token-level fix above covers all of them without a per-file
+  check. `Review.css` renders its error/warning blocks at ordinary body text sizes, same
+  4.5:1/3:1 split as above — no additional failures found.
+
+Slice 6 status: status-color/focus-ring token pairings and the real-usage spot-checks above are
+fully covered by this pass. Full Slice 6 completion also requires the parallel identity-palette
+pass (ink/paper/cart-blue/basil/border) to be recorded — see that pass's own section for its
+results.
+
+#### 2.7 results — identity palette (ink/paper/cart-blue/basil/border)
+
+Real WCAG relative-luminance math (sRGB→linear, L, then `(L1+0.05)/(L2+0.05)`) computed
+against the actual current `tokens.css` hex values, 2026-07-20. Covers the identity-palette
+pairings; the parallel pass above covers status colors and the focus ring — together the two
+passes are Slice 6 in full.
+
+**Cross-check against Stage 2's numbers** (recorded in §8 A5-1): independently recomputed
+`--color-ink` vs `--color-paper` (14.78:1 light / 14.19:1 dark), `--color-ink` vs
+`--color-paper-raised` (15.98:1 light / 12.87:1 dark), `--color-cart-blue` vs `--color-paper`
+(4.71:1 light / 5.60:1 dark), and `--color-cart-blue` vs `--color-paper-raised` (5.09:1 light /
+5.07:1 dark). All four match Stage 2's figures exactly — no discrepancy, no token drift since
+that pass.
+
+**Text-on-background pairings** (4.5:1 threshold — confirmed via
+`grep -rn "color-ink-muted\|color-cart-blue" web/src --include="*.css"` that these tokens are
+used at `--text-sm`/`--text-base`/`--text-xs`, `--weight-regular`/`--weight-emphasis` (600), in
+real screens — never at large-text size/weight, so the stricter 4.5:1 floor applies throughout,
+not the 3:1 large-text floor):
+
+| Pairing | Light | Dark | Result |
+|---|---|---|---|
+| `--color-ink` vs `--color-paper` | 14.78:1 | 14.19:1 | Pass both |
+| `--color-ink` vs `--color-paper-raised` | 15.98:1 | 12.87:1 | Pass both |
+| `--color-ink-muted` vs `--color-paper` | 5.27:1 | 6.41:1 | Pass both |
+| `--color-ink-muted` vs `--color-paper-raised` | 5.70:1 | 5.81:1 | Pass both |
+| `--color-cart-blue` vs `--color-paper` | 4.71:1 | 5.60:1 | Pass both |
+| `--color-cart-blue` vs `--color-paper-raised` | 5.09:1 | 5.07:1 | Pass both |
+| `--color-cart-blue-strong` vs `--color-paper` | 6.10:1 | 7.70:1 | Pass both |
+| `--color-cart-blue-strong` vs `--color-paper-raised` | 6.60:1 | 6.98:1 | Pass both |
+| `--color-basil` vs `--color-basil-bg` | was 4.39:1 (**fail**) → fixed to 5.02:1 | 5.57:1 (already passing) | Pass both (after fix) |
+
+`--color-basil` (light) failed by a narrow margin: `.cart-result__badge--added` and
+`ConfidenceBadge--high` render this pairing at `--text-xs` (12px) / `--weight-emphasis` (600) —
+not large text — so 4.39:1 was a real, if small, non-passing gap under the 4.5:1 floor. Fixed by
+darkening `--color-basil` along its existing hue/saturation (HSL lightness 0.369 → 0.34) rather
+than lightening `--color-basil-bg`, since the "basil-tinted background" pairing's light,
+airy background tone reads as more identity-critical than the exact shade of the text color
+sitting on it. Dark `--color-basil` was already passing (5.57:1) and left untouched.
+
+**Non-text UI-component pairings** (3:1 threshold, WCAG 1.4.11 — `--color-border` and
+`--color-basil-border` are both used on real interactive-component boundaries, not just
+decorative dividers: `grep -rn "color-border" web/src --include="*.css"` shows it on
+`input[type="text"]` fields (Preferences, Setup, RecipesList), buttons
+(`.recipes-list__refresh`, `.recipe-card__delete`), and clickable cards (`.recipe-card`,
+`.ingredient-card`, `.match-picker__summary`); `--color-basil-border` outlines the
+pantry-staple/confidence badge chips):
+
+| Pairing | Light | Dark | Result |
+|---|---|---|---|
+| `--color-border` vs `--color-paper` | was 1.23:1 (**fail**) → fixed to 3.46:1 | was 1.45:1 (**fail**) → fixed to 3.90:1 | Pass both (after fix) |
+| `--color-border` vs `--color-paper-raised` | was 1.33:1 (**fail**) → fixed to 3.74:1 | was 1.32:1 (**fail**) → fixed to 3.54:1 | Pass both (after fix) |
+| `--color-basil-border` vs `--color-paper` | was 1.32:1 (**fail**) → fixed to 3.65:1 | was 1.81:1 (**fail**) → fixed to 3.88:1 | Pass both (after fix) |
+| `--color-basil-border` vs `--color-paper-raised` | was 1.43:1 (**fail**) → fixed to 3.95:1 | was 1.64:1 (**fail**) → fixed to 3.52:1 | Pass both (after fix) |
+| `--color-basil-border` vs `--color-basil-bg` (its actual real-usage neighbor, checked in addition to the two pairings above since every real badge sits directly on `--color-basil-bg`, not bare paper) | was 1.29:1 (**fail**) → fixed to 3.56:1 | was 1.49:1 (**fail**) → fixed to 3.21:1 | Pass both (after fix) |
+
+Both border tokens failed outright, and badly, in every pairing in both themes (original values
+were near-invisible tints, ~1.2–1.8:1 — a genuine non-text-contrast failure, not an edge case;
+these borders would have been effectively invisible against their surfaces). Fixed by darkening
+(light theme) / lightening (dark theme) along each token's existing hue, rather than touching
+`--color-paper`/`--color-paper-raised`/`--color-basil-bg` — those surface tokens carry more of
+the "warm kraft-paper" / "basil-tinted background" identity, so the border tokens (whose whole
+job is to be a visible outline) absorbed the fix:
+
+- `--color-border`: light `#e2ddd8` → `#92806d`; dark `#3a352c` → `#807561`
+- `--color-basil-border`: light `#c3ddc8` → `#4f8c5b`; dark `#35492f` → `#5c7f52`
+
+`--color-ink`, `--color-ink-muted`, `--color-cart-blue`, `--color-cart-blue-strong`, and dark
+`--color-basil` were all already passing and left untouched. `npm run build` confirmed clean
+after all token changes above (no broken `var()` references).
+
+Slice 6 status (identity-palette pass): fully covers ink/paper/cart-blue/basil/border. Combined
+with the status-color/focus-ring pass above, **Slice 6 is now complete in full** — every token
+pairing in §2.1's color table has been checked against real WCAG math in both themes, and every
+failure found has been fixed and reverified.
+
 ## 3. Screens & components in scope
 
 | Screen/component | Current CSS state | Work needed |
@@ -210,7 +347,9 @@ broader accessibility work begins.
 4. **Cart Result signature receipt treatment** (§2.5) — independent file set from Slices 2/3/5.
 5. **Wordmark + favicon/branding assets** (§2.6).
 6. **Accessibility contrast validation** (§2.7) — last, once the palette is locked by the
-   slices above.
+   slices above. **Done 2026-07-20** — see §2.7 results (two passes: status-color/focus-ring,
+   and identity-palette). All token pairings pass WCAG AA; several border/badge tokens were
+   fixed in `tokens.css`.
 
 **Execution strategy:** the same frozen-contract pattern that worked cleanly for Phase 5's
 UI slices — Slice 1 lands first, alone (small and foundational; one agent or done directly,
@@ -246,14 +385,37 @@ npm packages plus new CSS/asset files.
 
 ## 8. Open Action Items
 
-- [ ] **A5-1 — Cart Result total-line color.** §2.5 leaves this as either `--color-ink` or
-  `--color-cart-blue` for emphasis — decide at implementation time based on which passes WCAG
-  AA contrast more comfortably against `--color-paper` in both themes (§2.7 covers the check;
-  this item is picking the winner).
-- [ ] **A5-2 — Wordmark face-per-word split.** §2.6 gives "Recipe" in body weight / "Cart" in
-  the display face as an example treatment, not a locked decision — confirm the exact
-  weight/face/color split when actually building the `AppShell` wordmark (Slice 5), since it's
-  the one place this phase's typography choices become a literal brand mark.
+- [x] **A5-1 — Cart Result total-line color.** Decided: **`--color-ink`**. Computed contrast
+  ratios (WCAG relative-luminance formula) for both candidates against both paper surfaces, in
+  both themes:
+
+  | Pairing | Light | Dark |
+  |---|---|---|
+  | `--color-ink` vs `--color-paper` | 14.78:1 | 14.19:1 |
+  | `--color-ink` vs `--color-paper-raised` | 15.98:1 | 12.87:1 |
+  | `--color-cart-blue` vs `--color-paper` | 4.71:1 | 5.60:1 |
+  | `--color-cart-blue` vs `--color-paper-raised` | 5.09:1 | 5.07:1 |
+
+  Both colors clear WCAG AA everywhere (`--text-xl` bold qualifies as "large text," so the
+  3:1 floor applies, and even the stricter 4.5:1 normal-text floor is met by every cell above).
+  But `--color-cart-blue` on `--color-paper` in light mode sits at 4.71:1 — only 0.21 above the
+  4.5:1 floor, with no margin for the total figure ever being reduced from bold to regular
+  weight later. `--color-ink` clears every pairing by 12.87:1 or better, nearly 3x the required
+  margin in the tightest case. Implemented in `web/src/screens/CartResult/CartResult.css`
+  (`.cart-result__receipt-total-value`).
+- [x] **A5-2 — Wordmark face-per-word split.** Resolved during Slice 5. Final treatment:
+  "Recipe" in `--font-body` (Karla) at `--weight-regular` / `--text-md`, colored
+  `--color-ink-muted`; "Cart" in `--font-display` (Fraunces) at `--weight-heading` (700) /
+  `--text-lg`, colored `--color-cart-blue` (hover/focus shifts to `--color-cart-blue-strong`).
+  Rationale: the weight/face split alone (example treatment) read as arbitrary, so color was
+  added as a third axis carrying the actual meaning — "Recipe" stays muted/quiet because it's
+  the input the user already has, "Cart" is bold, larger, and rendered in the app's one
+  existing primary-action color because it's the output the app produces. Reusing
+  `--color-cart-blue` (rather than inventing a new wordmark-only accent) was deliberate: it's
+  already the color a user associates with "the button that does the thing" everywhere else in
+  the app, so the wordmark points at the same color instead of introducing a second brand
+  color to track. This same "Cart = bold + brand blue" logic is what the favicon monogram
+  (§2.6) is derived from.
 
 ## 9. Blockers
 

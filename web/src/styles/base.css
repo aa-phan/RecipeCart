@@ -1,0 +1,35 @@
+/* Global reset + base element styles — spec-5-visual-design.md Slice 1.
+ * Intentionally minimal: box-sizing + margin/padding reset only. Per-element
+ * styling (lists, buttons, forms) stays with each screen's own CSS until
+ * the Slice 2 token-migration pass. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: var(--color-paper);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+}
+
+/* Always-visible focus indicator — never color-only (WCAG "don't rely on
+ * color alone", spec §2.7). Applies to every focusable element globally. */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}

@@ -1,39 +1,49 @@
 .connect-kroger {
-  max-width: 480px;
-  margin: 4rem auto;
-  padding: 1.5rem 1rem;
+  max-width: 420px;
+  margin: var(--space-12) auto 0;
+  padding: var(--space-8) var(--space-6);
   text-align: center;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 .connect-kroger__message {
-  font-size: 1.1rem;
-  margin: 0 0 1.5rem;
+  margin: 0 0 var(--space-6);
+  font-family: var(--font-body);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-emphasis);
+  color: var(--color-ink);
 }
 
 .connect-kroger__error {
-  color: #8a1f11;
-  background: #fdecea;
-  border: 1px solid #f5c2bc;
-  border-radius: 6px;
-  padding: 0.75rem 1rem;
-  margin: 0 0 1.5rem;
+  margin: 0 0 var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-md);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
 }
 
 .connect-kroger__action {
   display: inline-block;
-  padding: 0.75rem 1.5rem;
-  font-size: 1rem;
-  font-weight: 600;
-  text-decoration: none;
-  border: 1px solid #2563eb;
-  border-radius: 6px;
-  background: #2563eb;
+  border: 1px solid var(--color-cart-blue);
+  border-radius: var(--radius-md);
+  background: var(--color-cart-blue);
   color: #fff;
+  padding: var(--space-3) var(--space-6);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: var(--weight-emphasis);
+  text-decoration: none;
 }
 
 .connect-kroger__action:hover,
 .connect-kroger__action:focus-visible {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
+  background: var(--color-cart-blue-strong);
+  border-color: var(--color-cart-blue-strong);
+}
+
+.connect-kroger__action:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }

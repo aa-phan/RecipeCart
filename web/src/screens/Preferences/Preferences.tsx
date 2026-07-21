@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { apiGet, apiPatch } from "../../api/client";
 import type { PreferencesDto } from "../../api/types";
+import { getStoredTheme, setTheme, type ThemePreference } from "../../theme";
 import "./Preferences.css";
+
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
 
 // Comma-separated text <-> string[] helpers for the two list fields.
 function toCsv(items: string[]): string {
@@ -25,6 +32,17 @@ export default function Preferences() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  // Purely client-side display preference — stored in localStorage, not
+  // part of PreferencesDto/the API round trip (spec-5-visual-design.md §2.4).
+  const [themePreference, setThemePreference] = useState<ThemePreference>(
+    () => getStoredTheme(),
+  );
+
+  const handleThemeChange = (theme: ThemePreference) => {
+    setThemePreference(theme);
+    setTheme(theme);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +113,40 @@ export default function Preferences() {
           {error}
         </p>
       )}
+
+      <section
+        className="preferences__section"
+        aria-labelledby="theme-heading"
+      >
+        <h2 id="theme-heading" className="preferences__section-heading">
+          Appearance
+        </h2>
+        <p className="preferences__section-hint">
+          This device only — not saved to your account.
+        </p>
+        <div className="theme-toggle" role="radiogroup" aria-labelledby="theme-heading">
+          {THEME_OPTIONS.map((option) => (
+            <label
+              key={option.value}
+              className={
+                "theme-toggle__option" +
+                (themePreference === option.value
+                  ? " theme-toggle__option--selected"
+                  : "")
+              }
+            >
+              <input
+                type="radio"
+                name="theme"
+                value={option.value}
+                checked={themePreference === option.value}
+                onChange={() => handleThemeChange(option.value)}
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+      </section>
 
       <div className="preferences__field">
         <label>

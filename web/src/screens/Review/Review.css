@@ -1,69 +1,69 @@
 .review {
   max-width: 640px;
   margin: 0 auto;
-  padding: 1rem 1rem 3rem;
+  padding: var(--space-4) var(--space-4) var(--space-12);
 }
 
 .review__header {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-6);
 }
 
 .review__source {
-  color: #666;
-  margin: 0.25rem 0 0.75rem;
+  color: var(--color-ink-muted);
+  margin: var(--space-1) 0 var(--space-3);
   word-break: break-word;
 }
 
 .review__banner {
-  background: #eef2ff;
-  color: #33389b;
-  padding: 0.6rem 1rem;
-  border-radius: 8px;
-  font-weight: 600;
+  background: color-mix(in srgb, var(--color-cart-blue) 12%, var(--color-paper-raised));
+  color: var(--color-cart-blue-strong);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-weight: var(--weight-emphasis);
 }
 
 .review__stage-line {
-  color: #666;
+  color: var(--color-ink-muted);
 }
 
 .review__error {
-  color: #b3261e;
-  background: #fdeaea;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
 }
 
 .review__ingredients {
   list-style: none;
-  margin: 1rem 0;
+  margin: var(--space-4) 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .ingredient-card {
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
 }
 
 .ingredient-card__main {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .ingredient-card__name {
-  font-weight: 600;
+  font-weight: var(--weight-emphasis);
   min-width: 8rem;
   flex: 1 1 auto;
 }
 
 .ingredient-card__quantity {
   display: inline-flex;
-  gap: 0.25rem;
+  gap: var(--space-1);
 }
 
 .ingredient-card__quantity-input {
@@ -75,65 +75,65 @@
 }
 
 .ingredient-card__pantry-chip {
-  background: #fff4e0;
-  color: #a15c00;
-  font-size: 0.8em;
-  font-weight: 600;
-  padding: 0.15em 0.6em;
+  background: var(--color-basil-bg);
+  color: var(--color-basil);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-emphasis);
+  padding: var(--space-1) var(--space-2);
   border-radius: 999px;
 }
 
 .ingredient-card__why,
 .ingredient-card__remove {
-  font-size: 0.85em;
+  font-size: var(--text-sm);
   background: none;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  padding: 0.25em 0.6em;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
 }
 
 .ingredient-card__remove {
-  color: #b3261e;
-  border-color: #f3c8c5;
+  color: var(--color-error);
+  border-color: var(--color-error-border);
 }
 
 .ingredient-card__error {
-  color: #b3261e;
-  font-size: 0.85em;
-  margin: 0.4rem 0 0;
+  color: var(--color-error);
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
 }
 
 .evidence-snippet {
   list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0.5rem 0.75rem;
-  background: #fafafa;
-  border-radius: 6px;
-  font-size: 0.85em;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-paper);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--space-1);
 }
 
 .evidence-snippet__source {
-  font-weight: 600;
-  color: #555;
-  margin-right: 0.5em;
+  font-weight: var(--weight-emphasis);
+  color: var(--color-ink-muted);
+  margin-right: var(--space-2);
 }
 
 .evidence-snippet__text {
-  color: #333;
+  color: var(--color-ink);
 }
 
 .review__empty {
-  color: #666;
+  color: var(--color-ink-muted);
 }
 
 .review__add-ingredient {
   display: flex;
-  gap: 0.5rem;
-  margin: 1rem 0;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
 }
 
 .review__add-ingredient input {
@@ -141,50 +141,50 @@
 }
 
 .approve-button {
-  margin-top: 1.5rem;
+  margin-top: var(--space-6);
 }
 
 .approve-button__button {
   width: 100%;
-  padding: 0.9rem;
-  font-size: 1rem;
-  font-weight: 700;
-  background: #1e7e34;
+  padding: var(--space-4);
+  font-size: var(--text-base);
+  font-weight: var(--weight-heading);
+  background: var(--color-basil);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
 .approve-button__button:disabled {
-  background: #a7c9b0;
+  background: color-mix(in srgb, var(--color-basil) 55%, var(--color-paper));
   cursor: not-allowed;
 }
 
 .approve-button__error {
-  color: #b3261e;
-  margin-bottom: 0.5rem;
+  color: var(--color-error);
+  margin-bottom: var(--space-2);
 }
 
 .ingredient-card--needs-attention {
-  border-color: #f0b429;
-  background: #fffaf0;
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
 }
 
 .ingredient-card__product {
-  margin-top: 0.5rem;
+  margin-top: var(--space-2);
 }
 
 .ingredient-card__no-match {
-  color: #666;
-  font-size: 0.85em;
-  margin: 0.5rem 0 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
 }
 
 .match-picker {
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
 }
 
 .match-picker--collapsed {
@@ -195,19 +195,19 @@
 .match-picker__summary {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2);
   width: 100%;
-  background: #fafafa;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
+  background: var(--color-paper);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
   cursor: pointer;
   text-align: left;
 }
 
 .match-picker__summary:hover,
 .match-picker__summary:focus-visible {
-  background: #f0f0f0;
+  background: var(--color-border);
 }
 
 .match-picker__summary-body {
@@ -215,59 +215,59 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 0.1rem;
+  gap: var(--space-1);
 }
 
 .match-picker__summary-meta {
-  color: #666;
-  font-size: 0.85em;
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
 }
 
 .match-picker__change {
-  color: #2563eb;
-  font-size: 0.85em;
+  color: var(--color-cart-blue);
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 
 .match-picker__collapse {
-  margin-top: 0.5rem;
-  font-size: 0.85em;
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
   background: none;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  padding: 0.25em 0.6em;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
 }
 
 .match-picker__candidates {
   list-style: none;
-  margin: 0.5rem 0;
+  margin: var(--space-2) 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-2);
 }
 
 .match-picker__candidate label {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
   align-items: center;
 }
 
 .match-picker__candidate-body {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: var(--space-1);
 }
 
 .match-picker__candidate-size {
-  color: #666;
-  font-size: 0.85em;
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
 }
 
 .match-picker__candidate-note {
-  color: #666;
-  font-size: 0.8em;
+  color: var(--color-ink-muted);
+  font-size: var(--text-xs);
   font-style: italic;
 }
 
@@ -276,20 +276,20 @@
   height: 36px;
   flex-shrink: 0;
   object-fit: contain;
-  border: 1px solid #eee;
-  border-radius: 6px;
-  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-raised);
 }
 
 .match-picker__thumb--placeholder {
   display: inline-block;
-  background: #f0f0f0;
+  background: var(--color-border);
 }
 
 .match-picker__reason,
 .match-picker__error {
-  font-size: 0.85em;
-  color: #666;
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
 }
 
 .visually-hidden {

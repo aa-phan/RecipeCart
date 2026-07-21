@@ -118,10 +118,11 @@ Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so 
 
 ## Phase 6 — Visual Design
 
-**Status: scoped, not yet implemented (2026-07-20).** Full design detail (exact token values,
-type scale, spacing ladder, receipt-treatment spec, wordmark approach) lives in
-`files/specs/spec-5-visual-design.md` — this section is the phase-level summary only, mirroring
-Phases 1–5.
+**Status: DONE (2026-07-20).** Implemented same-day as scoping, via 3 staged rounds of parallel
+subagents (foundation → 6 parallel migration/build slices → 2 parallel contrast-audit passes).
+Full design detail (exact token values, type scale, spacing ladder, receipt-treatment spec,
+wordmark approach, and the real computed WCAG contrast tables) lives in `files/specs/
+spec-5-visual-design.md` — this section is the phase-level summary only, mirroring Phases 1–5.
 
 **Goal:** A real, considered visual identity for the web app — not fixing broken UX (Phase 5's
 job), but replacing ad-hoc, screen-by-screen CSS with a single deliberate design system.
@@ -130,30 +131,39 @@ Added 2026-07-20 after an audit of `web/src/**/*.css` found zero shared tokens, 
 type scale (an `em`/`rem` unit mismatch between screens), two screens shipping with zero CSS
 at all, and placeholder-grade PWA icons with no favicon or wordmark.
 
-**Scope** (Spec 5, all sections `[P6]`):
-- A token system (`web/src/styles/tokens.css`): a named identity palette (Ink/Ink Muted/
+**Scope** (Spec 5, all sections `[P6]`) — all done:
+- ✅ A token system (`web/src/styles/tokens.css`): a named identity palette (Ink/Ink Muted/
   Paper/Cart Blue/Basil/Border) plus status colors, with real light AND dark values —
   `:root[data-theme="dark"]` + `@media (prefers-color-scheme: dark)`, a light/dark/system
-  toggle added to the Preferences screen.
-- A real display/body type pairing (Fraunces + Karla, self-hosted via `@fontsource`) and a
-  consistent rem-based type scale, replacing the current all-system-font, `em`/`rem`-mixed
-  approach.
-- A disciplined 4px/0.25rem spacing ladder, replacing off-grid one-off values.
-- Every screen and shared component (`ConfidenceBadge`, `StageLine`) migrated onto the token
-  system; the two currently-unstyled screens (`ConnectKroger`, `FailureCard`) get real
-  treatment for the first time.
-- One deliberate signature moment, confined to a single screen: a grocery-receipt-styled
-  treatment on the Cart Result confirmation screen (perforated card edge, dotted-leader item
-  rows, display-face pricing, a total line) — everywhere else stays quiet/disciplined.
-- A typographic wordmark for "RecipeCart" in the nav (no illustrated logo mark) and a real
-  favicon/monogram replacing the current near-empty placeholder PWA icons.
-- A WCAG AA contrast validation pass on every token pairing, in both light and dark — narrower
-  than Phase 5's full accessibility item (Dynamic Type/VoiceOver/44pt targets stay Phase 5
-  scope), but ensures the new palette doesn't hand that later pass a non-compliant baseline.
+  toggle added to the Preferences screen (`theme.ts`, `localStorage`-backed, applied
+  synchronously before first render to avoid a theme-flash).
+- ✅ A real display/body type pairing (Fraunces + Karla, self-hosted via `@fontsource`) and a
+  consistent rem-based type scale, replacing the prior all-system-font, `em`/`rem`-mixed
+  approach (including a real audited fix of `Review.css`'s em/rem drift).
+- ✅ A disciplined 4px/0.25rem spacing ladder, replacing off-grid one-off values.
+- ✅ Every screen and shared component (`ConfidenceBadge`, `StageLine`) migrated onto the token
+  system; `ConnectKroger`/`FailureCard` (previously zero CSS) got real treatment from scratch;
+  `Preferences.css`'s pre-existing rules (missed in the first migration pass, caught during
+  integration) also migrated.
+- ✅ The signature moment: a grocery-receipt-styled treatment on the Cart Result confirmation
+  screen (CSS `clip-path` perforated edge, dotted-leader item rows, display-face pricing, a
+  double-rule total line) — confined to that one screen, everywhere else stays disciplined.
+- ✅ A typographic wordmark ("Recipe" in muted body weight, "Cart" in bold display-face brand
+  blue) in the nav, plus a hand-authored SVG monogram favicon and real regenerated PWA icons
+  (rasterized via a newly-added `sharp` dev dependency — no design tool was available in this
+  environment, so this was built from scratch as part of the work).
+- ✅ A real WCAG AA contrast validation pass on every token pairing, in both light and dark —
+  narrower than Phase 5's full accessibility item (Dynamic Type/VoiceOver/44pt targets stay
+  Phase 5 scope, and remain explicitly deprioritized there). This was a genuine audit, not a
+  formality: it found and fixed real failures — `--color-border`/`--color-basil-border` were
+  badly failing the 3:1 non-text threshold (as low as 1.23:1) against both surface colors, and
+  `--color-error-border`/`--color-warning-border` were failing the same way; all four fixed.
+  Full computed ratio tables live in `files/specs/spec-5-visual-design.md` §2.7.
 
-**Exit criteria:** Every screen renders from the token system (zero raw hex literals left in
-screen CSS), both light and dark themes render correctly across every screen, the Cart Result
-signature treatment is live, and every token color pairing passes WCAG AA contrast.
+**Exit criteria: MET.** Every screen renders from the token system (zero unintended raw hex
+literals left in screen CSS, confirmed via a repo-wide sweep), both light and dark themes
+render correctly, the Cart Result signature treatment is live, and every token color pairing
+has a real, computed, passing WCAG AA contrast ratio on record.
 
 ---
 

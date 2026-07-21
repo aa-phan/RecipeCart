@@ -1,4 +1,5 @@
 import { stageLineFor } from "../lib/stageLines";
+import "./StageLine.css";
 
 export interface StageLineProps {
   status: string | undefined;
@@ -8,5 +9,6 @@ export interface StageLineProps {
 
 /** Renders the plain-language line for a job status (see lib/stageLines.ts). */
 export default function StageLine({ status, itemCount, className }: StageLineProps) {
-  return <p className={className}>{stageLineFor(status, itemCount)}</p>;
+  const classes = ["stage-line", className].filter(Boolean).join(" ");
+  return <p className={classes}>{stageLineFor(status, itemCount)}</p>;
 }

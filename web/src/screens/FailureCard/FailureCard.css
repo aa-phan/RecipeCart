@@ -1,31 +1,48 @@
 .failure-card {
-  max-width: 480px;
-  margin: 4rem auto;
-  padding: 1.5rem 1rem;
+  max-width: 420px;
+  margin: var(--space-12) auto 0;
+  padding: var(--space-8) var(--space-6);
   text-align: center;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 .failure-card__loading {
-  color: #555;
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  color: var(--color-ink-muted);
 }
 
 .failure-card__message {
-  font-size: 1.1rem;
-  margin: 0 0 1.5rem;
+  margin: 0 0 var(--space-6);
+  font-family: var(--font-body);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-emphasis);
+  color: var(--color-ink);
 }
 
 .failure-card__action {
   display: inline-block;
-  padding: 0.75rem 1.5rem;
-  font-size: 1rem;
-  font-weight: 600;
-  border: 1px solid #2563eb;
-  border-radius: 6px;
-  background: #2563eb;
+  border: 1px solid var(--color-cart-blue);
+  border-radius: var(--radius-md);
+  background: var(--color-cart-blue);
   color: #fff;
+  padding: var(--space-3) var(--space-6);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: var(--weight-emphasis);
   text-decoration: none;
   cursor: pointer;
+}
+
+.failure-card__action:hover,
+.failure-card__action:focus-visible {
+  background: var(--color-cart-blue-strong);
+  border-color: var(--color-cart-blue-strong);
+}
+
+.failure-card__action:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
 
 .failure-card__action:disabled {
@@ -38,22 +55,25 @@
 }
 
 .failure-card__error {
-  color: #8a1f11;
-  background: #fdecea;
-  border: 1px solid #f5c2bc;
-  border-radius: 6px;
-  padding: 0.6rem 0.9rem;
-  margin: 1rem 0 0;
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-md);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
 }
 
 .failure-card__back {
-  margin-top: 2rem;
+  margin-top: var(--space-8);
 }
 
 .failure-card__back a {
-  color: #2563eb;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-cart-blue);
   text-decoration: none;
-  font-size: 0.9rem;
 }
 
 .failure-card__back a:hover,

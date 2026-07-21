@@ -1,24 +1,24 @@
 .setup {
   max-width: 640px;
   margin: 0 auto;
-  padding: 1.5rem 1rem 3rem;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: var(--space-6) var(--space-4) var(--space-12);
+  font-family: var(--font-body);
 }
 
 .setup h1 {
-  font-size: 1.375rem;
-  margin: 0 0 0.5rem;
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-2);
 }
 
 .setup__generate {
-  border: 1px solid #2563eb;
-  background: #2563eb;
+  border: 1px solid var(--color-cart-blue);
+  background: var(--color-cart-blue);
   color: #fff;
-  border-radius: 6px;
-  padding: 0.5rem 1.1rem;
-  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
   cursor: pointer;
-  margin: 0.75rem 0 1.25rem;
+  margin: var(--space-3) 0 var(--space-5);
 }
 
 .setup__generate:disabled {
@@ -27,72 +27,72 @@
 }
 
 .setup__error {
-  color: #8a1f11;
-  background: #fdecea;
-  border: 1px solid #f5c2bc;
-  border-radius: 6px;
-  padding: 0.6rem 0.9rem;
-  margin: 0 0 1rem;
-  font-size: 0.9rem;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
 }
 
 .setup__result {
-  border: 1px solid #ddd;
-  border-radius: 10px;
-  padding: 1.1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
 }
 
 .setup__result label {
   display: block;
-  font-weight: 600;
-  margin-bottom: 0.4rem;
+  font-weight: var(--weight-emphasis);
+  margin-bottom: var(--space-2);
 }
 
 .setup__token-row {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .setup__token-row input {
   flex: 1;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
 }
 
 .setup__copy {
-  border: 1px solid #ccc;
-  background: #fff;
-  border-radius: 6px;
-  padding: 0.5rem 0.9rem;
-  font-size: 0.9rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-paper-raised);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .setup__instructions {
-  color: #555;
-  font-size: 0.9rem;
-  margin: 0.9rem 0 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  margin: var(--space-4) 0 0;
 }
 
 .setup__warning {
-  color: #8a1f11;
-  background: #fdecea;
-  border: 1px solid #f5c2bc;
-  border-radius: 6px;
-  padding: 0.6rem 0.9rem;
-  margin: 0.9rem 0 0;
-  font-size: 0.85rem;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-sm);
 }
 
 .setup__continue {
   display: inline-block;
-  margin-top: 1.1rem;
-  color: #2563eb;
-  font-weight: 600;
+  margin-top: var(--space-4);
+  color: var(--color-cart-blue);
+  font-weight: var(--weight-emphasis);
   text-decoration: none;
 }
 
@@ -101,30 +101,30 @@
 }
 
 .setup__shortcut {
-  margin-top: 1.1rem;
-  padding-top: 1.1rem;
-  border-top: 1px solid #eee;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
 }
 
 .setup__shortcut-install {
   display: inline-block;
-  border: 1px solid #2563eb;
-  background: #2563eb;
+  border: 1px solid var(--color-cart-blue);
+  background: var(--color-cart-blue);
   color: #fff;
-  border-radius: 6px;
-  padding: 0.5rem 1.1rem;
-  font-size: 0.9rem;
-  font-weight: 600;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-emphasis);
   text-decoration: none;
   cursor: pointer;
 }
 
 .setup__shortcut-install:hover {
-  background: #1d4ed8;
+  background: var(--color-cart-blue-strong);
 }
 
 .setup__shortcut-note {
-  color: #555;
-  font-size: 0.85rem;
-  margin: 0.6rem 0 0;
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
 }

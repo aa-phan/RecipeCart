@@ -83,6 +83,14 @@ export default function CartResult() {
   const needsAttention = data.results.filter(
     (item) => item.status === "needs_attention",
   );
+  // Sum of per-item prices for the receipt total. `CartResultDto` carries no
+  // separate total field, so this is computed client-side from the same
+  // per-item `price` the row already displays; missing prices contribute 0
+  // rather than breaking the total.
+  const addedTotal = added.reduce(
+    (sum, item) => sum + (typeof item.price === "number" ? item.price : 0),
+    0,
+  );
 
   return (
     <div className="cart-result">
@@ -96,11 +104,21 @@ export default function CartResult() {
         {added.length === 0 ? (
           <p className="cart-result__empty">No items were added.</p>
         ) : (
-          <ul className="cart-result__items">
-            {added.map((item) => (
-              <AddedItem key={itemKey(item)} item={item} />
-            ))}
-          </ul>
+          <div className="cart-result__receipt">
+            <ul className="cart-result__receipt-items">
+              {added.map((item) => (
+                <ReceiptItem key={itemKey(item)} item={item} />
+              ))}
+            </ul>
+            <div className="cart-result__receipt-rule" aria-hidden="true" />
+            <div className="cart-result__receipt-rule cart-result__receipt-rule--thin" aria-hidden="true" />
+            <div className="cart-result__receipt-total">
+              <span className="cart-result__receipt-total-label">Total</span>
+              <span className="cart-result__receipt-total-value">
+                ${addedTotal.toFixed(2)}
+              </span>
+            </div>
+          </div>
         )}
       </section>
 
@@ -154,18 +172,24 @@ function ItemPrice({ item }: { item: CartItemResult }) {
   return <span className="cart-result__price">${item.price.toFixed(2)}</span>;
 }
 
-function AddedItem({ item }: { item: CartItemResult }) {
+/** A single line item in the receipt-styled "Added" panel (spec §2.5): name
+ * on the left in the body face, a dotted leader running to the price on the
+ * right in the display face — the itemized-receipt line, not a generic card
+ * row. `NeedsAttentionItem` below keeps the plain card treatment; the
+ * receipt motif is intentionally confined to genuinely-added items. */
+function ReceiptItem({ item }: { item: CartItemResult }) {
+  const priceLabel =
+    item.price === undefined || item.price === null
+      ? "—"
+      : `$${item.price.toFixed(2)}`;
   return (
-    <li className="cart-result__item">
-      <ProductThumbnail item={item} />
-      <div className="cart-result__item-body">
-        <span className="cart-result__item-name">{displayName(item)}</span>
-        <div className="cart-result__item-meta">
-          <span className="cart-result__badge cart-result__badge--added">Added</span>
-          <ItemPrice item={item} />
-        </div>
-        {item.reason && <p className="cart-result__reason">{item.reason}</p>}
+    <li className="cart-result__receipt-item">
+      <div className="cart-result__receipt-line">
+        <span className="cart-result__receipt-name">{displayName(item)}</span>
+        <span className="cart-result__receipt-leader" aria-hidden="true" />
+        <span className="cart-result__receipt-price">{priceLabel}</span>
       </div>
+      {item.reason && <p className="cart-result__reason">{item.reason}</p>}
     </li>
   );
 }

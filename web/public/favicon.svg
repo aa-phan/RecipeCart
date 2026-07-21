@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="RecipeCart">
+  <!-- Monogram derived from the AppShell wordmark treatment (spec-5-visual-design.md
+       section 2.6 / A5-2): the wordmark renders "Cart" bold and in the brand blue as the
+       app's output/brand-color half, "Recipe" muted as the input half. The favicon
+       distills that same logic into a single mark rather than inventing a new symbol:
+       a bold "C" (for Cart) in the brand blue, drawn as a thick open ring rather than
+       with the display serif; at 16x16 (real favicon size) Fraunces's fine serif
+       detail disappears, so the shape trades typeface fidelity for a bold, high contrast
+       geometric form that stays legible at tab size. -->
+  <rect width="64" height="64" rx="16" fill="#2563eb" />
+  <path
+    d="M 42.29 19.74 A 16 16 0 1 0 42.29 44.26"
+    fill="none"
+    stroke="#f7f4ee"
+    stroke-width="9"
+    stroke-linecap="round"
+  />
+</svg>

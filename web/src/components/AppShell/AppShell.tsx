@@ -23,7 +23,8 @@ export default function AppShell({ children }: AppShellProps) {
     <div className="app-shell">
       <header className="app-shell__header">
         <NavLink to="/" className="app-shell__brand">
-          RecipeCart
+          <span className="app-shell__brand-recipe">Recipe</span>
+          <span className="app-shell__brand-cart">Cart</span>
         </NavLink>
         <nav className="app-shell__nav" aria-label="Main">
           <NavLink

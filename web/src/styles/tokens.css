@@ -1,0 +1,113 @@
+/* Design token system — spec-5-visual-design.md §2.1 (color), §2.2 (type),
+ * §2.3 (spacing). Single source of truth for color/type/spacing values;
+ * screens should reference these custom properties instead of raw literals.
+ *
+ * Dark mode mechanism (§2.4): an explicit `data-theme="dark"`/`"light"` on
+ * <html> (set via the Preferences toggle, src/theme.ts) always wins over the
+ * OS-level `prefers-color-scheme`. When no explicit preference is stored
+ * ("system"), no `data-theme` attribute is present at all, so the media
+ * query below applies. `:root[data-theme="light"]` explicitly opts out of
+ * the dark media query even when the OS is in dark mode.
+ */
+
+:root {
+  /* Identity palette (light) */
+  --color-ink: #23201b;
+  --color-ink-muted: #6b6558;
+  --color-paper: #f7f4ee;
+  --color-paper-raised: #fffdf9;
+  --color-cart-blue: #2563eb;
+  --color-cart-blue-strong: #1d4ed8;
+  --color-basil: #3a7344;
+  --color-basil-bg: #eaf4ec;
+  --color-basil-border: #4f8c5b;
+  --color-border: #92806d;
+
+  /* Status colors (light) */
+  --color-error: #b3261e;
+  --color-error-bg: #fdecea;
+  --color-error-border: #c85c52;
+  --color-warning: #a15c00;
+  --color-warning-bg: #fff4e0;
+  --color-warning-border: #b57e08;
+  --color-focus-ring: var(--color-cart-blue);
+
+  /* Typography */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "Karla", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.375rem;
+  --text-xl: 1.75rem;
+  --text-2xl: 2.25rem;
+
+  --weight-regular: 400;
+  --weight-emphasis: 600;
+  --weight-heading: 700;
+
+  /* Spacing scale (§2.3) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+}
+
+/* Explicit user choice: dark (wins over OS default) */
+:root[data-theme="dark"] {
+  --color-ink: #eae6dd;
+  --color-ink-muted: #a39b8a;
+  --color-paper: #1b1815;
+  --color-paper-raised: #252119;
+  --color-cart-blue: #5b8dfb;
+  --color-cart-blue-strong: #82aaff;
+  --color-basil: #6fae78;
+  --color-basil-bg: #1e2c20;
+  --color-basil-border: #5c7f52;
+  --color-border: #807561;
+
+  --color-error: #e2665c;
+  --color-error-bg: #3a1f1c;
+  --color-error-border: #c25b50;
+  --color-warning: #d99a3d;
+  --color-warning-bg: #3a2c14;
+  --color-warning-border: #987530;
+  --color-focus-ring: var(--color-cart-blue);
+}
+
+/* OS-level default: only applies when the user hasn't made an explicit
+ * choice (no data-theme attribute at all) and hasn't opted out via
+ * data-theme="light". */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --color-ink: #eae6dd;
+    --color-ink-muted: #a39b8a;
+    --color-paper: #1b1815;
+    --color-paper-raised: #252119;
+    --color-cart-blue: #5b8dfb;
+    --color-cart-blue-strong: #82aaff;
+    --color-basil: #6fae78;
+    --color-basil-bg: #1e2c20;
+    --color-basil-border: #5c7f52;
+    --color-border: #807561;
+
+    --color-error: #e2665c;
+    --color-error-bg: #3a1f1c;
+    --color-error-border: #c25b50;
+    --color-warning: #d99a3d;
+    --color-warning-bg: #3a2c14;
+    --color-warning-border: #987530;
+    --color-focus-ring: var(--color-cart-blue);
+  }
+}

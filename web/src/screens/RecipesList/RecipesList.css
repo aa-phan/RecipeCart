@@ -1,29 +1,29 @@
 .recipes-list {
   max-width: 640px;
   margin: 0 auto;
-  padding: 1.5rem 1rem 3rem;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: var(--space-6) var(--space-4) var(--space-12);
+  font-family: var(--font-body);
 }
 
 .recipes-list__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
 }
 
 .recipes-list__header h1 {
-  font-size: 1.375rem;
+  font-size: var(--text-lg);
   margin: 0;
 }
 
 .recipes-list__refresh {
-  border: 1px solid #ccc;
-  background: #fff;
-  border-radius: 6px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.9rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-paper-raised);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -46,25 +46,25 @@
 
 .recipes-list__submit {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
 .recipes-list__submit input {
   flex: 1;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 0.95rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
 }
 
 .recipes-list__submit button {
-  border: 1px solid #2563eb;
-  background: #2563eb;
+  border: 1px solid var(--color-cart-blue);
+  background: var(--color-cart-blue);
   color: #fff;
-  border-radius: 6px;
-  padding: 0.5rem 1.1rem;
-  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -75,26 +75,26 @@
 }
 
 .recipes-list__submit-note {
-  color: #1a5c1a;
-  background: #eaf7ea;
-  border: 1px solid #c2e8c2;
-  border-radius: 6px;
-  padding: 0.6rem 0.9rem;
-  margin: 0 0 1rem;
-  font-size: 0.9rem;
+  color: var(--color-basil);
+  background: var(--color-basil-bg);
+  border: 1px solid var(--color-basil-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
 }
 
 .recipes-list__duplicate-actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin: -0.5rem 0 1rem;
+  gap: var(--space-3);
+  margin: calc(-1 * var(--space-2)) 0 var(--space-4);
 }
 
 .recipes-list__duplicate-link {
-  color: #2563eb;
-  font-size: 0.9rem;
-  font-weight: 600;
+  color: var(--color-cart-blue);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-emphasis);
   text-decoration: none;
 }
 
@@ -104,12 +104,12 @@
 }
 
 .recipes-list__duplicate-reprocess {
-  border: 1px solid #2563eb;
-  background: #fff;
-  color: #2563eb;
-  border-radius: 6px;
-  padding: 0.35rem 0.9rem;
-  font-size: 0.85rem;
+  border: 1px solid var(--color-cart-blue);
+  background: var(--color-paper-raised);
+  color: var(--color-cart-blue);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -119,29 +119,29 @@
 }
 
 .recipes-list__submit-error {
-  color: #8a1f11;
-  background: #fdecea;
-  border: 1px solid #f5c2bc;
-  border-radius: 6px;
-  padding: 0.6rem 0.9rem;
-  margin: 0 0 1rem;
-  font-size: 0.9rem;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
 }
 
 .recipes-list__loading,
 .recipes-list__empty {
-  color: #555;
-  padding: 2rem 0;
+  color: var(--color-ink-muted);
+  padding: var(--space-8) 0;
   text-align: center;
 }
 
 .recipes-list__error {
-  color: #8a1f11;
-  background: #fdecea;
-  border: 1px solid #f5c2bc;
-  border-radius: 6px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .recipes-list__items {
@@ -150,21 +150,23 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .recipe-card {
   position: relative;
-  border: 1px solid #ddd;
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
 .recipe-card__link {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 1rem 1.1rem;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-4);
+  /* Room for the absolutely-positioned delete button; not a spacing-scale
+   * value, it's sized to the control it clears rather than to rhythm. */
   padding-right: 5rem;
   text-decoration: none;
   color: inherit;
@@ -172,41 +174,43 @@
 
 .recipe-card__link:hover,
 .recipe-card__link:focus-visible {
-  background: #f5f5f7;
+  /* No dedicated "hover surface" token exists yet; --color-paper is the
+   * closest neutral (page background) tone available. */
+  background: var(--color-paper);
 }
 
 .recipe-card__link:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--color-cart-blue);
   outline-offset: -2px;
 }
 
 .recipe-card__title {
-  font-weight: 600;
-  font-size: 1.05rem;
+  font-weight: var(--weight-emphasis);
+  font-size: var(--text-base);
 }
 
 .recipe-card__stage {
   margin: 0;
-  color: #555;
-  font-size: 0.9rem;
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
 }
 
 .recipe-card__delete {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  border: 1px solid #ccc;
-  background: #fff;
-  color: #8a1f11;
-  border-radius: 6px;
-  padding: 0.3rem 0.7rem;
-  font-size: 0.8rem;
+  top: var(--space-3);
+  right: var(--space-3);
+  border: 1px solid var(--color-border);
+  background: var(--color-paper-raised);
+  color: var(--color-error);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
 .recipe-card__delete:hover {
-  background: #fdecea;
-  border-color: #f5c2bc;
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
 }
 
 .recipe-card__delete:disabled {
@@ -216,24 +220,24 @@
 
 .recipe-card__error {
   margin: 0;
-  padding: 0.5rem 1.1rem 0.75rem;
-  color: #8a1f11;
-  font-size: 0.85rem;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  color: var(--color-error);
+  font-size: var(--text-sm);
 }
 
 .recipes-list__done {
-  margin-top: 1.25rem;
+  margin-top: var(--space-5);
 }
 
 .recipes-list__done-summary {
   cursor: pointer;
-  font-weight: 600;
-  color: #555;
-  padding: 0.5rem 0;
+  font-weight: var(--weight-emphasis);
+  color: var(--color-ink-muted);
+  padding: var(--space-2) 0;
   list-style: revert;
 }
 
 .recipes-list__items--done {
-  margin-top: 0.75rem;
+  margin-top: var(--space-3);
   opacity: 0.85;
 }
