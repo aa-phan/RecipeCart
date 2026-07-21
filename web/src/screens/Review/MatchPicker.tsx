@@ -80,6 +80,9 @@ export default function MatchPicker({ recipeId, match, onChange }: MatchPickerPr
                   {selected.price !== null && ` · $${selected.price.toFixed(2)}`}
                   {selected.quantityToOrder > 1 && ` · x${selected.quantityToOrder}`}
                 </span>
+                {selected.reason && (
+                  <span className="match-picker__candidate-note">{selected.reason}</span>
+                )}
               </span>
             </>
           ) : (
@@ -126,6 +129,9 @@ export default function MatchPicker({ recipeId, match, onChange }: MatchPickerPr
                     {candidate.name}
                   </span>
                   <span className="match-picker__candidate-size">{candidate.size}</span>
+                  {candidate.reason && (
+                    <span className="match-picker__candidate-note">{candidate.reason}</span>
+                  )}
                 </span>
                 {candidate.price !== null && (
                   <span className="match-picker__candidate-price">

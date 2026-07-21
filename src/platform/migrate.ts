@@ -9,10 +9,12 @@ import { type Kysely } from "kysely";
 import { getDb, closeDb, type DB } from "./database.js";
 import * as m001 from "./migrations/001_initial.js";
 import * as m002 from "./migrations/002_auth_and_preferences.js";
+import * as m003 from "./migrations/003_ingredient_confidence.js";
 
 const migrations: Record<string, Migration> = {
   "001_initial": m001,
   "002_auth_and_preferences": m002,
+  "003_ingredient_confidence": m003,
 };
 
 class StaticProvider implements MigrationProvider {

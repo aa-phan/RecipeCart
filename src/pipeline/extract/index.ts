@@ -189,7 +189,7 @@ export async function extract(
  * on the `recipes` PK on a second attempt. Live-caught via a real
  * crash-recovery test: a job retried after a stale-lock requeue hit a
  * unique-constraint violation here instead of completing. */
-async function persistFailure(
+export async function persistFailure(
   recipeId: string,
   sourceUrl: string,
   err: ExtractionError,
@@ -286,6 +286,10 @@ async function persist(recipe: Recipe, recipeId: string): Promise<void> {
         raw_text: ing.raw_text,
         is_pantry_staple: ing.is_pantry_staple ? true : false,
         evidence_json: JSON.stringify(ing.canonical_name_en.evidence ?? []),
+        // PRD C1 §21: carry the canonical-name field's confidence band
+        // through to the ingredients table so Review can render it —
+        // previously computed by Claude and then discarded (003_ingredient_confidence migration).
+        confidence: ing.canonical_name_en.confidence ?? null,
       }));
       if (ingredientRows.length > 0) {
         await trx.insertInto("ingredients").values(ingredientRows).execute();

@@ -10,6 +10,8 @@ export type FailureClass =
   | "download_failed_transient"
   | "model_call_failed"
   | "schema_validation_failed"
+  | "extraction_timeout"
+  | "not_a_recipe"
   | "kroger_not_connected"
   | "kroger_token_expired"
   | "cart_partially_failed"
@@ -43,6 +45,21 @@ const FAILURE_CARDS: Record<FailureClass, FailureCard> = {
   schema_validation_failed: {
     message: "The recipe couldn't be structured reliably from this video.",
     recoveryAction: "Retry, or edit the ingredients manually.",
+  },
+  extraction_timeout: {
+    message: "This recipe took too long to process.",
+    recoveryAction: "Retry.",
+  },
+  not_a_recipe: {
+    // Deliberately distinct from every other card (Spec C2 §26): this must
+    // not read as "a garbled recipe or a generic error" — the video was
+    // successfully processed, it just isn't a recipe. There's nothing to
+    // reprocess or reconnect, so the primary action just navigates home
+    // (recoveryHref, not the default reprocess-POST button) rather than
+    // offering a retry that would only reach the same conclusion.
+    message: "This doesn't look like a recipe video.",
+    recoveryAction: "Back to recipes",
+    recoveryHref: () => "/",
   },
   kroger_not_connected: {
     message: "Your Kroger account isn't connected yet.",

@@ -52,6 +52,10 @@ export interface IngredientDto {
   rawText: string | null;
   isPantryStaple: boolean;
   evidence: EvidenceRef[];
+  /** canonical_name_en's confidence band (ConfidenceBandSchema), when the
+   * extraction produced one. Absent for manually-added ingredients and rows
+   * persisted before this field existed. */
+  confidence?: "high" | "medium" | "low";
 }
 
 // ── Matches ─────────────────────────────────────────────────────────────

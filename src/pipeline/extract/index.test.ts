@@ -61,9 +61,15 @@ const validatedRecipe = {
       canonical_name_en: {
         value: "flour",
         evidence: [{ source_type: "ocr" as const, frame_ref: "f1", snippet: "2 cups flour" }],
+        confidence: "high" as const,
       },
       raw_text: "2 cups flour",
-      quantity: { value: 2, unit: "cup", raw_text: "2 cups" },
+      quantity: {
+        value: 2,
+        unit: "cup",
+        raw_text: "2 cups",
+        evidence: [{ source_type: "ocr" as const, frame_ref: "f1", snippet: "2 cups flour" }],
+      },
       is_pantry_staple: false,
     },
   ],
@@ -134,6 +140,10 @@ describe("extract (orchestrator)", () => {
     expect(ingredientRows).toHaveLength(1);
     expect(ingredientRows[0]!.canonical_name).toBe("flour");
     expect(ingredientRows[0]!.is_pantry_staple).toBe(false);
+    // PRD C1 §21: canonical_name_en's confidence band must survive
+    // persistence, not be discarded between reconcile and the ingredients
+    // table (003_ingredient_confidence migration).
+    expect(ingredientRows[0]!.confidence).toBe("high");
   });
 
   // Live-caught bug (2026-07-19, real crash-recovery test): the worker's

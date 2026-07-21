@@ -20,7 +20,13 @@ export type FailureClass =
   // Claude call failed after the SDK's transient retries were exhausted.
   | "model_call_failed"
   // Response still failed schema validation after one corrective re-prompt.
-  | "schema_validation_failed";
+  | "schema_validation_failed"
+  // The job-level hard timeout (Spec C2 §26, config.extraction.jobTimeoutMs)
+  // fired before extract() returned — the worker gives up waiting rather
+  // than hanging forever; the underlying extract() call keeps running
+  // detached in the background (no cooperative cancellation for the
+  // yt-dlp/Whisper/Claude calls it wraps).
+  | "extraction_timeout";
 
 /** A classified, terminal extraction failure. `userFacingReason` is safe to
  * show in a Spec 1 failure card; `cause` keeps the original error for logs. */
@@ -74,5 +80,7 @@ export function userFacingReasonFor(failureClass: FailureClass, detail?: string)
       return "The extraction service was temporarily unavailable. Try again in a bit.";
     case "schema_validation_failed":
       return `The recipe couldn't be structured reliably from this video${detail ? ` (${detail})` : ""}.`;
+    case "extraction_timeout":
+      return "This recipe took too long to extract.";
   }
 }

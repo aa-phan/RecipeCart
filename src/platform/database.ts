@@ -57,6 +57,10 @@ export interface IngredientsTable {
   is_pantry_staple: Generated<boolean>;
   evidence_json: JSONColumnType<unknown[]>;
   created_at: Generated<Date>;
+  /** canonical_name_en's confidence band ("high" | "medium" | "low",
+   * ConfidenceBandSchema) — null for pre-migration rows and manually-added
+   * ingredients, which have nothing for Claude to grade. */
+  confidence: string | null;
 }
 
 export interface ProductMatchesTable {

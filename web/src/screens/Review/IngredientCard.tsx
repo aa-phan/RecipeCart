@@ -130,6 +130,8 @@ export default function IngredientCard({
           />
         </span>
 
+        {ingredient.confidence && <ConfidenceBadge level={ingredient.confidence} />}
+
         {ingredient.quantityValue === null && <ConfidenceBadge level="amount_unclear" />}
 
         {ingredient.isPantryStaple && (

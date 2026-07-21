@@ -55,7 +55,12 @@ describe("postprocess", () => {
             evidence: [{ source_type: "ocr", frame_ref: "f1", snippet: "1 tsp salt" }],
           },
           raw_text: "1 teaspoon salt",
-          quantity: { value: 1, unit: "teaspoon", raw_text: "1 teaspoon" },
+          quantity: {
+            value: 1,
+            unit: "teaspoon",
+            raw_text: "1 teaspoon",
+            evidence: [{ source_type: "ocr", frame_ref: "f1", snippet: "1 tsp salt" }],
+          },
           is_pantry_staple: false,
         },
         {
@@ -64,7 +69,12 @@ describe("postprocess", () => {
             evidence: [{ source_type: "caption", snippet: "800g chicken thighs" }],
           },
           raw_text: "800g chicken thighs",
-          quantity: { value: 800, unit: "grams", raw_text: "800g" },
+          quantity: {
+            value: 800,
+            unit: "grams",
+            raw_text: "800g",
+            evidence: [{ source_type: "caption", snippet: "800g chicken thighs" }],
+          },
           is_pantry_staple: false,
         },
       ],

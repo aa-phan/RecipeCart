@@ -12,12 +12,20 @@
 // per-substage breakdown would need extract() to accept a stage-callback,
 // which is out of scope for this slice (worker wraps the pipeline unchanged).
 import { logger } from "../platform/logger.js";
-import { extract } from "../pipeline/extract/index.js";
+import { extract, persistFailure } from "../pipeline/extract/index.js";
 import { ExtractionError } from "../pipeline/extract/failures.js";
 import { matchRecipeAndPersist } from "../matcher/index.js";
 import { loadStoreLocation } from "../kroger/store_config.js";
 import { loadPreferences } from "../api/routes/preferences.js";
-import { setStage, finishJob, heartbeat, JobStatus, type Job } from "../platform/jobs.js";
+import { config } from "../platform/config.js";
+import {
+  setStage,
+  finishJob,
+  heartbeat,
+  setRecipeFailureClass,
+  JobStatus,
+  type Job,
+} from "../platform/jobs.js";
 
 /** Runs one claimed job through extraction + matching to `awaiting_review` (or
  * a terminal failure state). Never touches the cart — approval is a separate,
@@ -47,14 +55,59 @@ export async function runJob(job: Job, workerId: string): Promise<void> {
     let resultType: string;
     try {
       await setStage(jobId, JobStatus.ExtractingRecipe);
-      const { recipe, recipeId: id } = await extract(job.source_url, jobId, {});
-      recipeId = id;
-      resultType = recipe.result_type;
+      // Hard job timeout (Spec C2 §26, config.extraction.jobTimeoutMs): race
+      // extract() against a timer rather than trusting it to always settle.
+      // Promise.race can only ABANDON the loser, not cancel it — there's no
+      // cooperative cancellation for the yt-dlp/Whisper/Claude calls extract()
+      // wraps — so on timeout the extract() call keeps running detached in
+      // the background.
+      const extractPromise = extract(job.source_url, jobId, {});
+      let timeoutHandle: NodeJS.Timeout;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new ExtractionError("extraction_timeout", "This recipe took too long to extract."));
+        }, config.extraction.jobTimeoutMs);
+      });
+      try {
+        const { recipe, recipeId: id } = await Promise.race([extractPromise, timeoutPromise]);
+        recipeId = id;
+        resultType = recipe.result_type;
+      } catch (err) {
+        if (err instanceof ExtractionError && err.failureClass === "extraction_timeout") {
+          // extract()'s own internal catch (index.ts's persistFailure) will
+          // never fire for this outcome — we abandoned the await before it
+          // could throw. Persist the failure row here via the exact same
+          // upsert mechanism extract() uses for every other terminal failure
+          // class, so recipes.failure_class ends up populated identically
+          // either way (and the outer catch below can treat this exactly
+          // like any other classified ExtractionError).
+          await persistFailure(jobId, job.source_url, err);
+          // Never let the abandoned call's eventual settlement surface as an
+          // unhandled promise rejection.
+          extractPromise.catch(() => {});
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutHandle!);
+      }
     } finally {
       clearInterval(heartbeatTimer);
     }
 
     if (resultType === "not_a_recipe") {
+      // Distinct failure_class from a genuine technical failure (Spec C2
+      // §26): extract() already persisted a normal, successful `recipes` row
+      // for this classification (postprocess.ts's result_type is part of a
+      // valid Recipe, not an ExtractionError) — this UPDATEs that existing
+      // row via the same setRecipeFailureClass mechanism the Kroger
+      // connect/reconnect failure cards use, so the API/web failure-card
+      // lookup can render a friendly "not a recipe" message instead of the
+      // generic fallback.
+      await setRecipeFailureClass(
+        recipeId,
+        "not_a_recipe",
+        "This doesn't look like a recipe video.",
+      );
       await finishJob(jobId, JobStatus.Failed, {
         recipeId,
         error: "not_a_recipe",
@@ -73,13 +126,17 @@ export async function runJob(job: Job, workerId: string): Promise<void> {
     logger.info("worker: job reached awaiting_review", { jobId, recipeId });
   } catch (err) {
     if (err instanceof ExtractionError) {
-      // Extraction already persisted its own `recipes` failure row
-      // (pipeline/extract/index.ts's persistFailure) — the job just needs to
-      // reflect the same terminal outcome. All current FailureClass values
+      // The `recipes` failure row is already persisted by this point either
+      // way — extract() itself for download/model/schema failures
+      // (pipeline/extract/index.ts's persistFailure), or the inner
+      // catch above (same persistFailure function) for extraction_timeout,
+      // since extract() never gets the chance to run its own catch when
+      // Promise.race abandons it. The job just needs to reflect the same
+      // terminal outcome. All current FailureClass values
       // (download_failed_permanent/transient, model_call_failed,
-      // schema_validation_failed) are terminal-after-their-own-internal-retry
-      // (Spec 2 §3) by the time they surface here, so the job goes straight
-      // to Failed rather than requires_user_intervention.
+      // schema_validation_failed, extraction_timeout) are terminal by the
+      // time they surface here, so the job goes straight to Failed rather
+      // than requires_user_intervention.
       await finishJob(jobId, JobStatus.Failed, {
         error: `[${err.failureClass}] ${err.userFacingReason}`,
       });

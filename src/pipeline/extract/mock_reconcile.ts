@@ -86,7 +86,12 @@ function candidateToIngredient(candidate: Candidate): Ingredient {
     // Never fabricate a quantity the heuristic can't actually parse — same
     // no-inference rule as the real schema, just a much blunter instrument
     // for satisfying it (no real quantity parsing happens here at all).
-    quantity: { value: null, unit: null, raw_text: candidate.text },
+    quantity: {
+      value: null,
+      unit: null,
+      raw_text: candidate.text,
+      null_reason: "mock_reconcile: heuristic scan does not parse quantities",
+    },
     is_pantry_staple: false,
   };
 }

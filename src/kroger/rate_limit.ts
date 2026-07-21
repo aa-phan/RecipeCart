@@ -11,6 +11,7 @@
 import { sql } from "kysely";
 import { getDb } from "../platform/database.js";
 import { config } from "../platform/config.js";
+import { logger } from "../platform/logger.js";
 
 export type RateLimitEndpoint = "products" | "locations" | "cart";
 
@@ -64,15 +65,31 @@ export async function getUsage(endpoint: RateLimitEndpoint): Promise<number> {
   return row?.count ?? 0;
 }
 
-/** Increment today's (UTC) counter for an endpoint by 1, upserting the row. */
+/** Increment today's (UTC) counter for an endpoint by 1, upserting the row.
+ * Logs the resulting usage vs. the documented ceiling on every call so daily
+ * volume is observable (not just enforced) in production logs — see Spec 3
+ * §26. Logging every call rather than only at a threshold is deliberate:
+ * at single-user volume this is at most dozens of lines per matching run,
+ * not the thousands where per-call logging would be noisy, and a running
+ * count is simpler to reason about (and to grep/alert on) than a sampled
+ * one. */
 export async function recordCall(endpoint: RateLimitEndpoint): Promise<void> {
-  await getDb()
+  const row = await getDb()
     .insertInto("kroger_api_usage")
     .values({ day: today(), endpoint, count: 1 })
     .onConflict((oc) =>
       oc.columns(["day", "endpoint"]).doUpdateSet({ count: sql`kroger_api_usage.count + 1` }),
     )
-    .execute();
+    .returning("count")
+    .executeTakeFirstOrThrow();
+
+  const dailyLimit = ceilingFor(endpoint);
+  logger.info("kroger: rate limit usage", {
+    endpoint,
+    currentCount: row.count,
+    dailyLimit,
+    remaining: dailyLimit - row.count,
+  });
 }
 
 /** Throw RateLimitExceededError if today's usage for `endpoint` has reached

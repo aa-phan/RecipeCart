@@ -52,7 +52,12 @@ const validRecipe = {
         evidence: [{ source_type: "ocr", frame_ref: "frame-001", snippet: "2 cups flour" }],
       },
       raw_text: "2 cups flour",
-      quantity: { value: 2, unit: "cup", raw_text: "2 cups" },
+      quantity: {
+        value: 2,
+        unit: "cup",
+        raw_text: "2 cups",
+        evidence: [{ source_type: "ocr", frame_ref: "frame-001", snippet: "2 cups flour" }],
+      },
       is_pantry_staple: true,
     },
   ],
@@ -67,7 +72,12 @@ const invalidRecipe = {
       // non-null value with NO evidence -> should fail schema validation
       canonical_name_en: { value: "flour" },
       raw_text: "2 cups flour",
-      quantity: { value: 2, unit: "cup", raw_text: "2 cups" },
+      quantity: {
+        value: 2,
+        unit: "cup",
+        raw_text: "2 cups",
+        evidence: [{ source_type: "ocr", frame_ref: "frame-001", snippet: "2 cups flour" }],
+      },
       is_pantry_staple: true,
     },
   ],
@@ -168,7 +178,17 @@ describe("reconcile", () => {
             },
           },
           raw_text: "2 cups flour",
-          quantity: { value: 2, unit: "cup", raw_text: "2 cups" },
+          quantity: {
+            value: 0.75,
+            unit: "cup",
+            raw_text: "3/4 cup",
+            evidence: [{ source_type: "ocr", frame_ref: "frame-001", snippet: "3/4 cup sugar" }],
+            confidence: "high",
+            conflict: {
+              resolved_source: "ocr",
+              alternatives: [{ source_type: "asr", value: "1 cup sugar" }],
+            },
+          },
           is_pantry_staple: true,
         },
       ],
@@ -186,6 +206,15 @@ describe("reconcile", () => {
     expect(result.ingredients[0]?.canonical_name_en.confidence).toBe("high");
     expect(result.ingredients[0]?.canonical_name_en.conflict?.resolved_source).toBe("ocr");
     expect(result.title?.confidence).toBe("high");
+    // Quantity conflict (PRD C2 §26 headline example): narration "1 cup
+    // sugar" vs on-screen "3/4 cup" — OCR wins per priority, narration is
+    // retained on quantity.conflict rather than silently dropped.
+    expect(result.ingredients[0]?.quantity.value).toBe(0.75);
+    expect(result.ingredients[0]?.quantity.confidence).toBe("high");
+    expect(result.ingredients[0]?.quantity.conflict?.resolved_source).toBe("ocr");
+    expect(result.ingredients[0]?.quantity.conflict?.alternatives).toEqual([
+      { source_type: "asr", value: "1 cup sugar" },
+    ]);
   });
 
   it("includes escalation frame images as base64 content blocks", async () => {

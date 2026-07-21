@@ -164,6 +164,7 @@ function AddedItem({ item }: { item: CartItemResult }) {
           <span className="cart-result__badge cart-result__badge--added">Added</span>
           <ItemPrice item={item} />
         </div>
+        {item.reason && <p className="cart-result__reason">{item.reason}</p>}
       </div>
     </li>
   );

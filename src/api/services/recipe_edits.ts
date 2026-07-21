@@ -21,6 +21,7 @@ function toIngredientDto(row: {
   raw_text: string | null;
   is_pantry_staple: boolean;
   evidence_json: unknown[];
+  confidence?: string | null;
 }): IngredientDto {
   return {
     id: row.id,
@@ -30,6 +31,7 @@ function toIngredientDto(row: {
     rawText: row.raw_text,
     isPantryStaple: row.is_pantry_staple,
     evidence: row.evidence_json as EvidenceRef[],
+    confidence: (row.confidence ?? undefined) as IngredientDto["confidence"],
   };
 }
 
@@ -167,6 +169,7 @@ export async function addIngredient(
       raw_text: null,
       is_pantry_staple: false,
       evidence_json: JSON.stringify([]),
+      confidence: null,
     })
     .returningAll()
     .executeTakeFirstOrThrow();

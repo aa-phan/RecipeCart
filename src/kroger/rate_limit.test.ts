@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { resetDb } from "../platform/test-db.js";
+import { logger } from "../platform/logger.js";
 
 // Real Postgres (via resetDb()) so the actual UPSERT SQL in rate_limit.ts is
 // exercised, not just asserted about. The config mock spreads the REAL config
@@ -49,6 +50,46 @@ describe("recordCall / getUsage", () => {
     expect(await getUsage("products")).toBe(1);
     expect(await getUsage("cart")).toBe(2);
     expect(await getUsage("locations")).toBe(0);
+  });
+});
+
+describe("recordCall usage logging", () => {
+  it("logs current usage vs. the daily ceiling every time a call is recorded", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+    await recordCall("products"); // 1st call -> count 1
+    await recordCall("products"); // 2nd call -> count 2
+
+    expect(infoSpy).toHaveBeenCalledTimes(2);
+    expect(infoSpy).toHaveBeenNthCalledWith(1, "kroger: rate limit usage", {
+      endpoint: "products",
+      currentCount: 1,
+      dailyLimit: 100,
+      remaining: 99,
+    });
+    expect(infoSpy).toHaveBeenNthCalledWith(2, "kroger: rate limit usage", {
+      endpoint: "products",
+      currentCount: 2,
+      dailyLimit: 100,
+      remaining: 98,
+    });
+
+    infoSpy.mockRestore();
+  });
+
+  it("reports the correct ceiling for each endpoint", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+    await recordCall("cart");
+
+    expect(infoSpy).toHaveBeenCalledWith("kroger: rate limit usage", {
+      endpoint: "cart",
+      currentCount: 1,
+      dailyLimit: 50,
+      remaining: 49,
+    });
+
+    infoSpy.mockRestore();
   });
 });
 

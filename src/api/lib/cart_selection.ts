@@ -45,6 +45,7 @@ export async function buildApprovedItems(recipeId: string): Promise<ApprovedCart
         productName: c.name,
         imageUrl: c.imageUrl,
         price: c.price,
+        reason: c.reason,
       }));
 
     approved.push({
@@ -54,6 +55,7 @@ export async function buildApprovedItems(recipeId: string): Promise<ApprovedCart
       productName: selected.name,
       imageUrl: selected.imageUrl,
       price: selected.price,
+      reason: selected.reason,
       ...(fallbacks.length > 0 ? { fallbacks } : {}),
     });
   }

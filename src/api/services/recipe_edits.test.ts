@@ -69,6 +69,7 @@ async function seedRecipeWithIngredient(): Promise<void> {
       raw_text: "1 cup heavy cream",
       is_pantry_staple: false,
       evidence_json: JSON.stringify([]),
+      confidence: "medium",
     })
     .execute();
 }
@@ -107,6 +108,14 @@ describe("recipe_edits", () => {
           isPantryStaple: true,
         }),
       );
+    });
+
+    // PRD C1 §21: the DTO must carry the persisted confidence band through so
+    // Review can render ConfidenceBadge for real (non-"amount unclear")
+    // confidence, not just derive it from a column edit not touching it.
+    it("carries the ingredient's confidence band through in the DTO", async () => {
+      const result = await editIngredient(INGREDIENT_ID, { markOwned: true });
+      expect(result).toEqual(expect.objectContaining({ confidence: "medium" }));
     });
 
     it("marks an ingredient as owned via is_pantry_staple", async () => {
@@ -259,6 +268,11 @@ describe("recipe_edits", () => {
         .where("ingredient_id", "=", result.id)
         .executeTakeFirst();
       expect(matchRow).toBeUndefined();
+
+      // Manually-added ingredients never went through extraction, so there's
+      // no confidence band for Claude to have produced — the DTO field must
+      // be omitted (undefined), not a fabricated value.
+      expect(result.confidence).toBeUndefined();
     });
   });
 

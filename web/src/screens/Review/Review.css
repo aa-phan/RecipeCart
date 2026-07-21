@@ -265,6 +265,12 @@
   font-size: 0.85em;
 }
 
+.match-picker__candidate-note {
+  color: #666;
+  font-size: 0.8em;
+  font-style: italic;
+}
+
 .match-picker__thumb {
   width: 36px;
   height: 36px;

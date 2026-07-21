@@ -39,6 +39,13 @@ export interface CartItemResult {
   productName?: string;
   imageUrl?: string;
   price?: number | null;
+  // Display-only note carried from the approved ProductCandidate's own
+  // `reason` (e.g. "sold by weight — 1 package (variable weight, set at
+  // pickup)", src/matcher/types.ts) for a successfully `added` item — kept
+  // distinct from a `needs_attention` item's `reason`, which is always the
+  // Kroger failure explanation, not the matcher's note. When an added item
+  // ALSO used a fallback candidate, this is combined with the existing
+  // fallback-used note (see processItems) rather than overwritten by it.
 }
 
 export type CartRunStatus =
@@ -73,6 +80,12 @@ export interface ApprovedCartItem {
   productName?: string;
   imageUrl?: string;
   price?: number | null;
+  // Display-only note from the approved ProductCandidate's own `reason`
+  // (src/matcher/types.ts) — e.g. a weight-sold estimate disclosure.
+  // Populated by buildApprovedItems from `selected.reason`; carried onto the
+  // `added` CartItemResult by processItems below (PRD C3 §26 "clearly
+  // labeled as an estimate ... in the cart result").
+  reason?: string;
   // Next-best-ranked candidates to try, in order, ONLY when Kroger's
   // addToCart itself rejects `upc` (a real, detectable failure). This does
   // NOT help when Kroger accepts the add (204) for an item that later turns
@@ -85,7 +98,14 @@ export interface ApprovedCartItem {
   // improves the cases where Kroger DOES signal rejection at write time.
   // Each fallback carries its own display fields (its own candidate), since
   // whichever one actually gets added determines what the result should show.
-  fallbacks?: { upc: string; quantity: number; productName?: string; imageUrl?: string; price?: number | null }[];
+  fallbacks?: {
+    upc: string;
+    quantity: number;
+    productName?: string;
+    imageUrl?: string;
+    price?: number | null;
+    reason?: string;
+  }[];
 }
 
 // Small transient retry cap (Spec 3 §2.3 point 4) — only for fetch itself
@@ -305,6 +325,7 @@ async function addItemWithFallback(
       productName?: string;
       imageUrl?: string;
       price?: number | null;
+      reason?: string;
     }
   | { outcome: "needs_attention"; reason: string }
   | { outcome: "auth_failure"; reason: string }
@@ -316,6 +337,7 @@ async function addItemWithFallback(
       productName: item.productName,
       imageUrl: item.imageUrl,
       price: item.price,
+      reason: item.reason,
     },
     ...(item.fallbacks ?? []),
   ];
@@ -341,6 +363,7 @@ async function addItemWithFallback(
         productName: attempt.productName,
         imageUrl: attempt.imageUrl,
         price: attempt.price,
+        reason: attempt.reason,
       };
     }
     if (outcome.outcome === "auth_failure") {
@@ -376,6 +399,13 @@ async function processItems(
     const outcome = await addItemWithFallback(item, accessToken);
 
     if (outcome.outcome === "added") {
+      // Combine the candidate's own display note (e.g. a weight-sold
+      // estimate disclosure, PRD C3 §26) with the fallback-used note when
+      // both apply — neither should silently overwrite the other.
+      const fallbackNote = outcome.usedFallback
+        ? `fallback candidate used — original pick (${item.upc}) was rejected`
+        : undefined;
+      const reason = [outcome.reason, fallbackNote].filter(Boolean).join(" — ") || undefined;
       results.push({
         ingredientId: item.ingredientId,
         upc: outcome.upc,
@@ -383,9 +413,7 @@ async function processItems(
         productName: outcome.productName,
         imageUrl: outcome.imageUrl,
         price: outcome.price,
-        ...(outcome.usedFallback
-          ? { reason: `fallback candidate used — original pick (${item.upc}) was rejected` }
-          : {}),
+        ...(reason ? { reason } : {}),
       });
       continue;
     }
