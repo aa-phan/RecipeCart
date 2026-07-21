@@ -372,15 +372,31 @@ URI updated in both places (Railway env var + Kroger dashboard).
   via SSH, not a live-caught automatic sweep. Worth watching the worker logs
   for `"worker: temp-media sweep"` the next time debris accumulates and is
   left alone long enough to sweep itself.
-- [ ] **Log redaction verified with a real token/key probe.** Verified at
-  the unit-test level (`src/api/server.test.ts`, confirmed to actually fail
-  without the fix) but not yet re-confirmed against Railway's live log
-  viewer specifically.
+- [x] **Log redaction verified with a real token/key probe.** Re-confirmed
+  against live production logs on 2026-07-20 (previously only verified at
+  the unit-test level, `src/api/server.test.ts`). Minted a real device token
+  via `POST /api/setup/device-token`, then drove it through several
+  authenticated requests (`GET /api/recipes`, `GET /api/preferences`) plus a
+  deliberate auth failure (garbage bearer token and a no-token request, both
+  401) to exercise the unhappy path. Pulled `railway logs --service
+  RecipeCart` and `railway logs --service worker` and grepped both for the
+  raw token substring: zero matches in either service. (The request logger
+  only serializes `method`/`url`/`hostname`/`remoteAddress`/`remotePort` for
+  incoming requests and `statusCode` for responses — it never puts headers
+  or the token into the log line in the first place, so there's no redaction
+  gap to exploit on this path.) Also checked `src/api/lib/auth.ts`
+  end-to-end: it extracts, hashes, and compares the token but never logs it,
+  including on the `unauthorized()` failure path.
 - [x] **External uptime monitor on `/health`.** UptimeRobot monitor created
   and confirmed live via its API: status `2` (up), type HTTP(s), 300s
   interval, pointed at the production `/health` URL.
-- [ ] **Postgres manual restore tested once and documented.** Not yet run —
-  see section E below.
+- [x] **Postgres manual restore tested once and documented.** Verified
+  2026-07-20 via a local restore (not Railway's dashboard backup UI — no
+  CLI support, and a second billed Postgres service wasn't worth the
+  ongoing cost just to prove restorability): `pg_dump` of production
+  restored into a local scratch database, `recipes`/`jobs` row counts and
+  a known recipe confirmed matching, scratch DB dropped after — see the
+  full record in section E below.
 - [x] **Device-token issuance tested from a fresh Shortcut install.**
   Genuinely done: a real Shortcut was built on a real iPhone per
   `docs/ios-shortcut.md`, a device token was minted via `/setup` (which
@@ -436,11 +452,11 @@ outcome.
 
 | Field | Value |
 |---|---|
-| Date run | _fill in_ |
-| Backup/snapshot source | _fill in — automatic daily backup timestamp, or manual snapshot ID_ |
-| Restored to | _fill in — scratch DB/project name_ |
-| `recipes` row count (prod vs restored) | _fill in_ |
-| `jobs` row count (prod vs restored) | _fill in_ |
-| Known test recipe present? | _fill in — yes/no, which recipe_ |
-| Outcome | _fill in — pass/fail, and any issues hit along the way_ |
-| Run by | _fill in_ |
+| Date run | 2026-07-20 |
+| Backup/snapshot source | Not Railway's dashboard "Backups" UI — Railway CLI has no `backup`/`restore` subcommand, and provisioning a second billed Postgres service just to prove restorability wasn't worth the ongoing cost. Instead: fresh `pg_dump` of production taken directly at drill time via `DATABASE_PUBLIC_URL` (public proxy, `tokaido.proxy.rlwy.net:15434/railway`), custom format (`-F c`), using `postgresql@18` client tools (`brew install postgresql@18`) since prod runs Postgres 18.4 and the local default client (Homebrew postgresql@16) refused with a server-version mismatch. |
+| Restored to | Local scratch DB `recipecart_restore_drill` on the machine's existing local Postgres 16 server (not a new Railway service — deliberately avoids creating new billed cloud infrastructure while still proving a real dump artifact restores cleanly) |
+| `recipes` row count (prod vs restored) | 1 vs 1 — match |
+| `jobs` row count (prod vs restored) | 1 vs 1 — match |
+| Known test recipe present? | Yes — `16b2bb9d-fe5f-418f-8819-3fa52f7a8764` / "Sheet Pan Cheesy Chicken Fajita Burritos", confirmed present in restored DB by exact id and title match against production |
+| Outcome | Pass. Only issues were expected/benign: (1) local pg16 client tools couldn't dump an 18.4 server, resolved by installing `postgresql@18` via Homebrew and using its `pg_dump`/`pg_restore` binaries directly; (2) `pg_restore` emitted non-fatal errors for `SET transaction_timeout` (pg18-only param, unrecognized by local pg16 server) and `ALTER TABLE ... OWNER TO postgres` (local role `postgres` doesn't exist, local user is `aphan`) — both are ownership/permission noise, not data-loading failures, and all rows loaded correctly. Scratch DB dropped and dump file deleted after verification. |
+| Run by | Automated agent (Claude Code), as part of this session's operational drill work |
