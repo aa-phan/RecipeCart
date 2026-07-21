@@ -277,9 +277,14 @@ export async function setRecipeFailureClass(
 }
 
 /** Requeue jobs whose worker died mid-stage (lock older than staleLockMs).
- * Re-runnable stages go back to `received`; a stale cart mutation is paused as
- * `requires_user_intervention` (never blindly re-run — Spec 3 §17). Returns the
- * number of jobs acted on. */
+ * Re-runnable stages go back to `received`, UNLESS the job has already hit
+ * `maxStaleRequeueAttempts`, in which case it's failed outright instead of
+ * requeued again — a job that reliably crashes the worker mid-stage (not
+ * just an unlucky one-off deploy/restart) would otherwise loop forever,
+ * crashing the single-replica worker on a ~staleLockMs cycle and blocking
+ * every other job behind it (real incident, 2026-07-21). A stale cart
+ * mutation is paused as `requires_user_intervention` (never blindly
+ * re-run — Spec 3 §17). Returns the number of jobs acted on. */
 export async function requeueStaleJobs(): Promise<number> {
   const db = getDb();
   const staleBefore = new Date(Date.now() - config.jobs.staleLockMs);
@@ -298,8 +303,40 @@ export async function requeueStaleJobs(): Promise<number> {
     .where("locked_at", "is not", null)
     .where("locked_at", "<", staleBefore)
     .where("status", "in", REQUEUEABLE_STATES)
+    .where("attempt_count", "<", config.jobs.maxStaleRequeueAttempts)
     .returning("id")
     .execute();
+
+  const exhausted = await db
+    .updateTable("jobs")
+    .set({
+      status: JobStatus.Failed,
+      stage: JobStatus.Failed,
+      locked_by: null,
+      locked_at: null,
+      updated_at: sql`now()`,
+      last_error: `[repeated_worker_crash] gave up after ${config.jobs.maxStaleRequeueAttempts} stale-lock requeues — this job appears to reliably crash the worker mid-stage rather than hitting a one-off blip`,
+    })
+    .where("locked_at", "is not", null)
+    .where("locked_at", "<", staleBefore)
+    .where("status", "in", REQUEUEABLE_STATES)
+    .where("attempt_count", ">=", config.jobs.maxStaleRequeueAttempts)
+    .returning(["id", "recipe_id"])
+    .execute();
+
+  // A recipe row may already exist (e.g. the job died during
+  // matching_products, after extract() persisted it) — mark it the same way
+  // any other terminal extraction failure would be, so the FailureCard
+  // lookup renders something specific instead of the generic fallback.
+  for (const r of exhausted) {
+    if (r.recipe_id) {
+      await setRecipeFailureClass(
+        r.recipe_id,
+        "repeated_worker_crash",
+        "This recipe kept crashing while processing.",
+      );
+    }
+  }
 
   const paused = await db
     .updateTable("jobs")
@@ -318,8 +355,15 @@ export async function requeueStaleJobs(): Promise<number> {
     .execute();
 
   for (const r of requeued) await recordEvent({ jobId: r.id, type: "job_requeued_stale" });
+  for (const r of exhausted) {
+    await recordEvent({
+      jobId: r.id,
+      recipeId: r.recipe_id ?? undefined,
+      type: "job_failed_repeated_crash",
+    });
+  }
   for (const r of paused) await recordEvent({ jobId: r.id, type: "job_paused_stale_cart" });
-  return requeued.length + paused.length;
+  return requeued.length + exhausted.length + paused.length;
 }
 
 /** Append an event to the log (Spec 4 §2.4 events, append-only). */

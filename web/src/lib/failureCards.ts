@@ -11,6 +11,7 @@ export type FailureClass =
   | "model_call_failed"
   | "schema_validation_failed"
   | "extraction_timeout"
+  | "repeated_worker_crash"
   | "not_a_recipe"
   | "kroger_not_connected"
   | "kroger_token_expired"
@@ -49,6 +50,10 @@ const FAILURE_CARDS: Record<FailureClass, FailureCard> = {
   extraction_timeout: {
     message: "This recipe took too long to process.",
     recoveryAction: "Retry.",
+  },
+  repeated_worker_crash: {
+    message: "This recipe kept crashing while processing.",
+    recoveryAction: "Try a shorter or caption-only video, or come back later.",
   },
   not_a_recipe: {
     // Deliberately distinct from every other card (Spec C2 §26): this must

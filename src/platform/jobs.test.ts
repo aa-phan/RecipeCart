@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { getDb } from "./database.js";
 import { resetDb } from "./test-db.js";
+import { config } from "./config.js";
 import {
   enqueueJob,
   claimNextJob,
@@ -143,6 +144,55 @@ describe("jobs queue", () => {
       .where("id", "=", b.id)
       .executeTakeFirstOrThrow();
     expect(bRow.status).toBe(JobStatus.RequiresUserIntervention);
+  });
+
+  // Real incident, 2026-07-21: a job that reliably crashed the worker
+  // mid-stage (Whisper ASR OOM) got requeued after every stale-lock sweep
+  // forever, crashing the single-replica worker on a ~staleLockMs loop and
+  // blocking the queue behind it. requeueStaleJobs() must give up after
+  // maxStaleRequeueAttempts rather than requeuing indefinitely.
+  it("fails a job outright once it exceeds maxStaleRequeueAttempts, instead of requeuing forever", async () => {
+    const { job } = await enqueueJob(VIDEO_URL);
+    await getDb()
+      .insertInto("recipes")
+      .values({
+        id: "recipe-crash-loop",
+        source_url: VIDEO_URL,
+        extraction_version: "test",
+        recipe_json: JSON.stringify({}),
+      })
+      .execute();
+    await getDb()
+      .updateTable("jobs")
+      .set({
+        status: JobStatus.ExtractingRecipe,
+        stage: JobStatus.ExtractingRecipe,
+        recipe_id: "recipe-crash-loop",
+        locked_by: "worker-A",
+        locked_at: new Date(Date.now() - 30 * 60_000),
+        attempt_count: config.jobs.maxStaleRequeueAttempts,
+      })
+      .where("id", "=", job.id)
+      .execute();
+
+    const acted = await requeueStaleJobs();
+    expect(acted).toBe(1);
+
+    const row = await getDb()
+      .selectFrom("jobs")
+      .selectAll()
+      .where("id", "=", job.id)
+      .executeTakeFirstOrThrow();
+    expect(row.status).toBe(JobStatus.Failed);
+    expect(row.locked_by).toBeNull();
+    expect(row.last_error).toContain("repeated_worker_crash");
+
+    const recipeRow = await getDb()
+      .selectFrom("recipes")
+      .selectAll()
+      .where("id", "=", "recipe-crash-loop")
+      .executeTakeFirstOrThrow();
+    expect(recipeRow.failure_class).toBe("repeated_worker_crash");
   });
 
   // Live-caught bug (2026-07-19, real crash-recovery test): a job requeued

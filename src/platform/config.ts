@@ -164,6 +164,17 @@ export const config = {
     // abandoned (crashed worker) and is requeued (re-runnable stages) or moved
     // to requires_user_intervention (mid-cart-mutation).
     staleLockMs: 10 * 60_000,
+    // Cap on how many times a job may be requeued after a stale lock before
+    // it's given up on as terminally failed instead. Without this, a job
+    // that reliably crashes the worker mid-stage (e.g. the known Whisper
+    // ASR OOM on caption-insufficient videos, staleLockMs's doc comment)
+    // gets requeued forever: crash, wait staleLockMs, requeue, crash again
+    // — taking the single-replica worker down on a ~staleLockMs cycle
+    // indefinitely and blocking every other job behind it. Real incident,
+    // 2026-07-21: one such job crashed the worker 6 times in 30 minutes
+    // before being manually failed. attempt_count already exists and is
+    // incremented on every claimNextJob; this just gives it a ceiling.
+    maxStaleRequeueAttempts: 3,
     // How often the worker sweeps for stale locks.
     staleSweepIntervalMs: 30_000,
     // Awaiting-review → Expired TTL (Spec 4 A4-6, recommended 14 days).
