@@ -11,9 +11,13 @@ const AUTH_HEADER = { authorization: `Bearer ${RAW_TOKEN}` };
 async function seedToken(): Promise<void> {
   const hash = crypto.createHash("sha256").update(RAW_TOKEN).digest("hex");
   await getDb()
-    .updateTable("users")
-    .set({ device_token_hash: hash })
-    .where("id", "=", DEFAULT_USER_ID)
+    .insertInto("device_tokens")
+    .values({
+      id: crypto.randomUUID(),
+      user_id: DEFAULT_USER_ID,
+      token_hash: hash,
+      device_name: "Test device",
+    })
     .execute();
 }
 

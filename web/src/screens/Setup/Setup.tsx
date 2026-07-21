@@ -1,11 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { apiPost, ApiError } from "../../api/client";
+import { apiPost, apiGet, apiDelete, ApiError } from "../../api/client";
+import type { DeviceDto } from "../../api/types";
 import { AUTHED_FLAG_KEY } from "../../auth/AuthGate";
 import { SHORTCUT_ICLOUD_URL } from "../../lib/shortcutConfig";
 import "./Setup.css";
 
-type DeviceTokenResponse = { token: string };
+type DeviceTokenResponse = { token: string; device: DeviceDto };
+
+function formatLastUsed(lastUsedAt: string | null): string {
+  return lastUsedAt ? new Date(lastUsedAt).toLocaleDateString() : "Never used";
+}
 
 // Device-token setup screen (Spec 1 A1-2, WS-E Phase 4) — the SINGLE place
 // a device token is minted and applied (AuthGate just redirects here for an
@@ -22,32 +27,80 @@ type DeviceTokenResponse = { token: string };
 // iCloud share link there; see that file's comment for why it can't be
 // generated here.
 // Minting is unauthenticated on the server side (see routes/setup.ts for
-// why that's an acceptable tradeoff for this single-household MVP) and
-// OVERWRITES any previously-issued token, so this screen makes that
-// overwrite explicit rather than implying the action is additive.
+// why that's an acceptable tradeoff for this single-household MVP). Each
+// mint creates a new, independently-revocable device (see DeviceDto /
+// GET /api/devices below) rather than invalidating any token issued
+// before it.
 export default function Setup() {
+  const [deviceName, setDeviceName] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [devices, setDevices] = useState<DeviceDto[] | null>(null);
+  const [devicesLoading, setDevicesLoading] = useState(true);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  const fetchDevices = useCallback(async () => {
+    setDevicesLoading(true);
+    setDevicesError(null);
+    try {
+      const result = await apiGet<DeviceDto[]>("/api/devices");
+      setDevices(result);
+    } catch (err) {
+      setDevicesError(
+        err instanceof ApiError ? err.message : "Couldn't load your devices.",
+      );
+    } finally {
+      setDevicesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDevices();
+  }, [fetchDevices]);
 
   const handleGenerate = async () => {
     setGenerating(true);
     setError(null);
     setCopied(false);
     try {
-      const result = await apiPost<DeviceTokenResponse>("/api/setup/device-token");
+      const result = await apiPost<DeviceTokenResponse>("/api/setup/device-token", {
+        deviceName: deviceName.trim() || undefined,
+      });
       setToken(result.token);
       // The response just set this browser's auth cookie server-side —
       // flip the client-side "am I set up" flag AuthGate checks so
       // navigating away doesn't bounce back here.
       localStorage.setItem(AUTHED_FLAG_KEY, "1");
+      fetchDevices();
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Couldn't generate a device token.",
       );
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleRevoke = async (id: string) => {
+    setRevokingId(id);
+    setDevicesError(null);
+    const previous = devices;
+    // Optimistic removal, matching RecipeCard's delete-with-list-refresh
+    // pattern — roll back if the request fails.
+    setDevices((prev) => (prev ? prev.filter((d) => d.id !== id) : prev));
+    try {
+      await apiDelete(`/api/devices/${id}`);
+    } catch (err) {
+      setDevices(previous ?? null);
+      setDevicesError(
+        err instanceof ApiError ? err.message : "Couldn't revoke that device.",
+      );
+    } finally {
+      setRevokingId(null);
     }
   };
 
@@ -68,6 +121,18 @@ export default function Setup() {
         Generate a device token to connect your iOS Shortcut (or this browser) to your
         RecipeCart account.
       </p>
+
+      <div className="setup__name-row">
+        <label htmlFor="device-name-input">Device name (optional)</label>
+        <input
+          id="device-name-input"
+          type="text"
+          value={deviceName}
+          onChange={(e) => setDeviceName(e.target.value)}
+          placeholder="e.g. iPhone Shortcut, MacBook Safari"
+          className="setup__name-input"
+        />
+      </div>
 
       <button
         type="button"
@@ -107,10 +172,9 @@ export default function Setup() {
             <code>docs/ios-shortcut.md</code>) for details on building the Shortcut.
           </p>
 
-          <p className="setup__warning" role="alert">
-            Generating a new token invalidates any token you've issued before — this
-            isn't additive. Any Shortcut or browser still using the old token will need
-            to be updated with this one.
+          <p className="setup__note">
+            This adds a new device to your account — it doesn't affect any device
+            already signed in. Manage or revoke devices below at any time.
           </p>
 
           <div className="setup__shortcut">
@@ -140,6 +204,44 @@ export default function Setup() {
           </Link>
         </div>
       )}
+
+      <section className="setup__devices">
+        <h2>Your devices</h2>
+
+        {devicesError && (
+          <p className="setup__error" role="alert">
+            {devicesError}
+          </p>
+        )}
+
+        {devicesLoading && !devices ? (
+          <p className="setup__devices-loading">Loading your devices…</p>
+        ) : devices && devices.length > 0 ? (
+          <ul className="setup__devices-list">
+            {devices.map((device) => (
+              <li key={device.id} className="setup__device">
+                <div className="setup__device-info">
+                  <span className="setup__device-name">{device.deviceName}</span>
+                  <span className="setup__device-meta">
+                    Added {new Date(device.createdAt).toLocaleDateString()} ·{" "}
+                    {formatLastUsed(device.lastUsedAt)}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRevoke(device.id)}
+                  disabled={revokingId === device.id}
+                  className="setup__device-revoke"
+                >
+                  {revokingId === device.id ? "Revoking…" : "Revoke"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="setup__devices-empty">No devices yet.</p>
+        )}
+      </section>
     </main>
   );
 }

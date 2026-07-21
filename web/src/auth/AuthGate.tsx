@@ -28,6 +28,17 @@ function isAuthed(): boolean {
  * response. Two different ways to authenticate the same browser was
  * confusing and redundant, so this component no longer duplicates that
  * logic — it just sends an unauthenticated visitor to /setup.
+ *
+ * This is the FIRST gate only — it checks a purely client-side flag once,
+ * before any API call happens, to catch a visitor who's never authenticated
+ * at all. It does not re-validate against the server, so it can't detect a
+ * token that was valid when the flag was set but has since gone stale
+ * (revoked, or invalidated by another device under the old single-slot
+ * design). That ongoing case is handled separately by api/client.ts: every
+ * API response is checked for 401, and a 401 clears this same flag and
+ * navigates to /setup from mid-session. The two mechanisms are
+ * complementary — this one is the entry check, client.ts is the staleness
+ * check — not redundant with each other.
  */
 export default function AuthGate({ children }: { children: ReactNode }) {
   const authed = isAuthed();

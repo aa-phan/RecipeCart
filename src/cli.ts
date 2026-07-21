@@ -78,18 +78,23 @@ program
 
 program
   .command("create-device-token")
+  .option("--name <name>", "a label for this device (e.g. \"phone\", \"iPad\")", "Unnamed device")
   .description(
-    "Mint a new device bearer token for the default user (Spec 4 §2.5) — prints the raw " +
-      "token once; only its hash is stored",
+    "Mint a new device bearer token for the default user (Spec 4 §2.5, per-device tokens as " +
+      "of Slice 2) — prints the raw token once; only its hash is stored",
   )
-  .action(async () => {
+  .action(async (cmdOptions: { name: string }) => {
     const token = crypto.randomBytes(32).toString("hex");
     const hash = crypto.createHash("sha256").update(token).digest("hex");
 
     await getDb()
-      .updateTable("users")
-      .set({ device_token_hash: hash })
-      .where("id", "=", DEFAULT_USER_ID)
+      .insertInto("device_tokens")
+      .values({
+        id: crypto.randomUUID(),
+        user_id: DEFAULT_USER_ID,
+        token_hash: hash,
+        device_name: cmdOptions.name,
+      })
       .execute();
 
     console.log(

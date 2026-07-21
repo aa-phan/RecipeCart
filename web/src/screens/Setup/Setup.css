@@ -10,6 +10,25 @@
   margin: 0 0 var(--space-2);
 }
 
+.setup__name-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 360px;
+}
+
+.setup__name-row label {
+  font-size: var(--text-sm);
+  color: var(--color-ink-muted);
+}
+
+.setup__name-input {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+
 .setup__generate {
   border: 1px solid var(--color-cart-blue);
   background: var(--color-cart-blue);
@@ -78,14 +97,10 @@
   margin: var(--space-4) 0 0;
 }
 
-.setup__warning {
-  color: var(--color-error);
-  background: var(--color-error-bg);
-  border: 1px solid var(--color-error-border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-4);
-  margin: var(--space-4) 0 0;
+.setup__note {
+  color: var(--color-ink-muted);
   font-size: var(--text-sm);
+  margin: var(--space-3) 0 0;
 }
 
 .setup__continue {
@@ -127,4 +142,78 @@
   color: var(--color-ink-muted);
   font-size: var(--text-sm);
   margin: var(--space-2) 0 0;
+}
+
+.setup__devices {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.setup__devices h2 {
+  font-size: var(--text-md);
+  margin: 0 0 var(--space-3);
+}
+
+.setup__devices-loading,
+.setup__devices-empty {
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.setup__devices-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.setup__device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.setup__device-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.setup__device-name {
+  font-weight: var(--weight-emphasis);
+  font-size: var(--text-sm);
+}
+
+.setup__device-meta {
+  color: var(--color-ink-muted);
+  font-size: var(--text-xs);
+}
+
+.setup__device-revoke {
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-paper-raised);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.setup__device-revoke:hover {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
+}
+
+.setup__device-revoke:disabled {
+  cursor: default;
+  opacity: 0.6;
 }

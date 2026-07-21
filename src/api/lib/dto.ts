@@ -109,6 +109,15 @@ export interface MatchEditRequest {
   selectedProductId?: string | null;
 }
 
+// ── Devices ─────────────────────────────────────────────────────────────
+
+export interface DeviceDto {
+  id: string;
+  deviceName: string;
+  createdAt: string; // ISO string
+  lastUsedAt: string | null; // ISO string or null
+}
+
 // ── Preferences ─────────────────────────────────────────────────────────
 
 export interface PreferencesDto {

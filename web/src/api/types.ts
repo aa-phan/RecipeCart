@@ -19,4 +19,5 @@ export type {
   ProductCandidate,
   CartItemResult,
   CartRunStatus,
+  DeviceDto,
 } from "../../../src/api/lib/dto.js";

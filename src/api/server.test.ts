@@ -18,7 +18,7 @@ import { resetDb } from "../platform/test-db.js";
 import { buildServer } from "./server.js";
 
 // Real-shaped device token: same format as lib/auth.ts expects (an opaque
-// bearer string, sha256-hashed and compared against `users.device_token_hash`).
+// bearer string, sha256-hashed and compared against `device_tokens.token_hash`).
 const PLANTED_TOKEN = "rc_live_9f3a1d7c2b6e4589a0d1f2c3b4a5968712345678";
 
 class CapturingStream {
@@ -34,9 +34,13 @@ class CapturingStream {
 async function seedPlantedToken(): Promise<void> {
   const hash = crypto.createHash("sha256").update(PLANTED_TOKEN).digest("hex");
   await getDb()
-    .updateTable("users")
-    .set({ device_token_hash: hash })
-    .where("id", "=", DEFAULT_USER_ID)
+    .insertInto("device_tokens")
+    .values({
+      id: crypto.randomUUID(),
+      user_id: DEFAULT_USER_ID,
+      token_hash: hash,
+      device_name: "Test device",
+    })
     .execute();
 }
 

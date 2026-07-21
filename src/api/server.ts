@@ -43,6 +43,7 @@ import krogerAuthRoutes from "./routes/kroger_auth.js";
 // TODO(B4): uncomment once routes/preferences.ts and routes/account.ts exist
 import preferencesRoutes from "./routes/preferences.js";
 import accountRoutes from "./routes/account.js";
+import devicesRoutes from "./routes/devices.js";
 
 // TODO(B5): uncomment once routes/health.ts exists. Remember: that route
 // must set `config: { skipAuth: true }` (see lib/auth.ts) since GET /health
@@ -163,6 +164,7 @@ export async function buildServer(opts: { loggerStream?: Writable } = {}): Promi
   // TODO(B4): uncomment once routes/preferences.ts and routes/account.ts exist
   await app.register(preferencesRoutes, { prefix: "/api" });
   await app.register(accountRoutes, { prefix: "/api" });
+  await app.register(devicesRoutes, { prefix: "/api" });
 
   // TODO(B5): uncomment once routes/health.ts exists. Remember: this route
   // must set `config: { skipAuth: true }` (see lib/auth.ts) since GET /health

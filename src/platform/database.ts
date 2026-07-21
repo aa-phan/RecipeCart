@@ -156,6 +156,20 @@ export interface PreferencesTable {
   updated_at: Generated<Date>;
 }
 
+export interface DeviceTokensTable {
+  id: string;
+  user_id: string;
+  /** bearer token, hashed at rest — looked up on every authenticated
+   * request (unique, backed by its own btree index in Postgres). */
+  token_hash: string;
+  /** no nullable name: the app layer supplies a default (e.g. "Unnamed
+   * device") when the user doesn't provide one, not the DB. */
+  device_name: string;
+  created_at: Generated<Date>;
+  /** null until the token's first real use. */
+  last_used_at: Date | null;
+}
+
 export interface DB {
   recipes: RecipesTable;
   ingredients: IngredientsTable;
@@ -167,6 +181,7 @@ export interface DB {
   events: EventsTable;
   kroger_auth: KrogerAuthTable;
   preferences: PreferencesTable;
+  device_tokens: DeviceTokensTable;
 }
 
 // ── Instance (lazy singleton, mirrors the old getDb() shape) ───────────────

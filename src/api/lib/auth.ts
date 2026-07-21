@@ -13,6 +13,7 @@ import crypto from "node:crypto";
 import fp from "fastify-plugin";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { getDb } from "../../platform/database.js";
+import { logger } from "../../platform/logger.js";
 import { unauthorized } from "./errors.js";
 
 declare module "fastify" {
@@ -59,14 +60,30 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     if (!token) throw unauthorized();
 
     const hash = hashToken(token);
-    const user = await getDb()
-      .selectFrom("users")
-      .where("device_token_hash", "=", hash)
-      .selectAll()
+    const deviceToken = await getDb()
+      .selectFrom("device_tokens")
+      .where("token_hash", "=", hash)
+      .select(["id", "user_id"])
       .executeTakeFirst();
-    if (!user) throw unauthorized();
+    if (!deviceToken) throw unauthorized();
 
-    request.userId = user.id;
+    request.userId = deviceToken.user_id;
+
+    // Best-effort last_used_at bump — a single indexed UPDATE by primary
+    // key, fired without blocking the request on it. A failure here (e.g. a
+    // transient DB hiccup) must never fail the actual auth check, which has
+    // already succeeded above.
+    getDb()
+      .updateTable("device_tokens")
+      .set({ last_used_at: new Date() })
+      .where("id", "=", deviceToken.id)
+      .execute()
+      .catch((err) => {
+        logger.warn("auth: failed to update device_tokens.last_used_at", {
+          deviceId: deviceToken.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
   });
 }
 
