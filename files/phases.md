@@ -108,11 +108,11 @@ Each spec tags its sections with the phase they belong to (`[P0]`–`[P5]`), so 
 - ✅ Privacy/Data screen; per-recipe delete and `DELETE /api/account/data` full wipe, verified end-to-end. Done.
 - ✅ Reprocess action; duplicate-share "view existing or reprocess" flow; Kroger connect/reconnect (re-authorize) flows polished. Done 2026-07-20.
 - ~~Accessibility pass: Dynamic Type, VoiceOver labels (confidence badges read aloud), 44pt targets, WCAG AA contrast.~~ **Explicitly deprioritized (2026-07-20) — open, non-blocking.** This is a hobby project with no ADA-compliance obligation; a full accessibility pass isn't worth the investment absent real user demand. Revisit if/when real usage or an actual accessibility need surfaces — this is the "documented, accepted exception" the exit criteria below already allows for, not a gap to silently work around.
-- Operational drills: kill the worker mid-job and confirm recovery (✅ already exercised for real during Phase 3 crash testing); verify Postgres backup restore once and document it (open); confirm no secrets appear in logs with a real-token probe (open); TTL sweep verified (✅ done — 1h sweep, confirmed working).
+- ✅ Operational drills: kill the worker mid-job and confirm recovery (already exercised for real during Phase 3 crash testing); Postgres backup restore, verified 2026-07-20 (local `pg_dump`/`pg_restore` drill, see `docs/deploy-railway.md` §E); log redaction verified with a real token probe, 2026-07-20 (see `docs/deploy-railway.md` §D); TTL sweep verified (1h sweep, confirmed working). All done.
 - Walk all four PRDs' acceptance-criteria lists and record pass/fail.
-- Evaluate whether real usage justifies a Kroger Partner-tier application (removes daily rate limits, adds cart-read access — Spec 3 §25).
+- ~~Evaluate whether real usage justifies a Kroger Partner-tier application (removes daily rate limits, adds cart-read access — Spec 3 "Known Limitations" L3-1/L3-2).~~ **Explicitly deprioritized (2026-07-20) — open, non-blocking.** Kroger's Public API tier's real limits (5,000 cart-adds/day, 10,000 product searches/day, no cart-read endpoint) are well beyond what a hobby/single-household usage pattern will ever hit, and Partner tier requires a separate business-approval process not worth pursuing without an actual reason. Revisit only if usage patterns genuinely change (e.g. opened up beyond one household and rate limits start to bite).
 
-**Exit criteria:** All PRD acceptance criteria pass or have a documented, accepted exception (accessibility is now formally one — see above). First trusted testers invited.
+**Exit criteria:** All PRD acceptance criteria pass or have a documented, accepted exception (accessibility and the Kroger Partner-tier evaluation are now formally two — see above). First trusted testers invited.
 
 ---
 
