@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPantryStaple, normalizeUnit, postprocess } from "./postprocess.js";
+import { isPantryStaple, normalizeUnit, postprocess, titleCase } from "./postprocess.js";
 import { SCHEMA_VERSION, type Recipe } from "../schema.js";
 
 function baseRecipe(overrides: Partial<Recipe> = {}): Recipe {
@@ -26,6 +26,21 @@ describe("normalizeUnit", () => {
 
   it("leaves unrecognized units unchanged rather than guessing", () => {
     expect(normalizeUnit("glugs")).toBe("glugs");
+  });
+});
+
+describe("titleCase", () => {
+  it("capitalizes each word", () => {
+    expect(titleCase("chicken thighs")).toBe("Chicken Thighs");
+    expect(titleCase("olive oil")).toBe("Olive Oil");
+  });
+
+  it("capitalizes each hyphenated segment", () => {
+    expect(titleCase("all-purpose flour")).toBe("All-Purpose Flour");
+  });
+
+  it("lowercases the rest of an all-caps word", () => {
+    expect(titleCase("GARLIC & herb cream cheese")).toBe("Garlic & Herb Cream Cheese");
   });
 });
 
@@ -87,5 +102,54 @@ describe("postprocess", () => {
     expect(result.ingredients[1]?.is_pantry_staple).toBe(false);
     // raw_text untouched
     expect(result.ingredients[0]?.raw_text).toBe("1 teaspoon salt");
+  });
+
+  it("title-cases canonical_name_en.value but leaves raw_text and evidence untouched", () => {
+    const recipe = baseRecipe({
+      ingredients: [
+        {
+          canonical_name_en: {
+            value: "chicken thighs",
+            evidence: [{ source_type: "caption", snippet: "800g chicken thighs" }],
+          },
+          raw_text: "800g chicken thighs",
+          quantity: {
+            value: 800,
+            unit: "g",
+            raw_text: "800g",
+            evidence: [{ source_type: "caption", snippet: "800g chicken thighs" }],
+          },
+          is_pantry_staple: false,
+        },
+      ],
+    });
+
+    const result = postprocess(recipe);
+    expect(result.ingredients[0]?.canonical_name_en.value).toBe("Chicken Thighs");
+    expect(result.ingredients[0]?.raw_text).toBe("800g chicken thighs");
+    expect(result.ingredients[0]?.canonical_name_en.evidence).toEqual([
+      { source_type: "caption", snippet: "800g chicken thighs" },
+    ]);
+  });
+
+  it("leaves a null canonical_name_en.value as null", () => {
+    const recipe = baseRecipe({
+      ingredients: [
+        {
+          canonical_name_en: { value: null, null_reason: "unclear from evidence" },
+          raw_text: "some stuff",
+          quantity: {
+            value: null,
+            unit: null,
+            raw_text: "some",
+            null_reason: "amount not stated",
+          },
+          is_pantry_staple: false,
+        },
+      ],
+    });
+
+    const result = postprocess(recipe);
+    expect(result.ingredients[0]?.canonical_name_en.value).toBeNull();
   });
 });

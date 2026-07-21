@@ -37,6 +37,35 @@ const STAGE_LINES: Record<JobStatusValue, string> = {
 
 const FALLBACK_LINE = "Working on it…";
 
+// Ordered extraction-pipeline stages (mirrors the worker's state machine,
+// src/worker/state_machine.ts's header comment) — used to derive a rough
+// fraction-complete for the progress bar. Only covers the pre-review leg;
+// post-approval statuses (adding_to_cart, completed, ...) aren't part of
+// this progression and return null below.
+const PROCESSING_STAGE_ORDER: JobStatusValue[] = [
+  "received",
+  "validating",
+  "downloading",
+  "processing_media",
+  "extracting_recipe",
+  "matching_products",
+  "awaiting_review",
+];
+
+/**
+ * Rough 0-1 completion fraction for the recipe-extraction leg of a job,
+ * derived from stage order rather than real substep timing (the worker
+ * can't observe finer-grained progress inside a single extract() call — see
+ * state_machine.ts). Returns null for statuses outside that progression
+ * (nothing to show a bar for).
+ */
+export function stageProgress(status: string | undefined): number | null {
+  if (!status) return null;
+  const idx = PROCESSING_STAGE_ORDER.indexOf(status as JobStatusValue);
+  if (idx === -1) return null;
+  return (idx + 1) / PROCESSING_STAGE_ORDER.length;
+}
+
 /**
  * Look up the plain-language line for a job status. When `itemCount` is
  * given for a `completed` status, it's folded in (e.g. "Done — 9 items

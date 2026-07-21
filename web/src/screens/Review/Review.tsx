@@ -4,6 +4,8 @@ import { apiGet } from "../../api/client";
 import type { IngredientDto, MatchDto, RecipeDetailDto } from "../../api/types";
 import { usePolling } from "../../hooks/usePolling";
 import StageLine from "../../components/StageLine";
+import ProgressBar from "../../components/ProgressBar";
+import { stageProgress } from "../../lib/stageLines";
 import IngredientCard from "./IngredientCard";
 import ApproveButton from "./ApproveButton";
 import "./Review.css";
@@ -139,9 +141,13 @@ export default function Review() {
   }
 
   if (isProcessing) {
+    const progress = stageProgress(recipe.status);
     return (
       <main className="review">
         <h1>{recipe.title?.trim() || "Your recipe"}</h1>
+        {progress !== null && (
+          <ProgressBar progress={progress} className="review__progress-bar" />
+        )}
         <StageLine status={recipe.status} className="review__stage-line" />
         <p className="review__processing-note">
           We'll show your ingredients here as soon as they're ready to review.

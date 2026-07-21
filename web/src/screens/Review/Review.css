@@ -22,6 +22,10 @@
   font-weight: var(--weight-emphasis);
 }
 
+.review__progress-bar {
+  margin: var(--space-3) 0 var(--space-2);
+}
+
 .review__stage-line {
   color: var(--color-ink-muted);
 }
