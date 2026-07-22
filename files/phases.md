@@ -209,18 +209,14 @@ picked up.
 - **Worker volume usage** was at 442MB/500MB after the 2026-07-20 ASR-OOM crash-loop fix —
   not yet re-verified whether that's stable/expected or a slow leak (temp-media sweep should
   be cleaning `data/tmp/`, worth confirming it actually is).
-- **First-time sign-in doesn't route to Kroger connection or store setup.** Originally found
-  2026-07-21 against the old `/setup` front door; the underlying gap survived the
-  multi-tenancy rewrite, just moved — `Login.tsx` (Google sign-in, multi-tenancy Slice 1) and
-  the post-login landing (`/?loggedIn=true` → RecipesList) don't check or prompt for Kroger
-  connection or store location either. `ConnectKroger` is still only reachable as a
-  `FailureCard` recovery link, and the new Preferences store-location field (Slice 2) is
-  opt-in, not prompted. A brand-new account (now genuinely easy to create — signup is open,
-  see the multi-tenancy section above) can submit a recipe, watch it reach `awaiting_review`,
-  and only THEN discover it has no store/Kroger connection when matching or cart-approval
-  fails. Needs an onboarding nudge — after first sign-in, before or alongside the first
-  recipe submission — not just waiting for a failure to surface it. More load-bearing now
-  than when first found, since new accounts are much easier to create.
+- ~~First-time sign-in doesn't route to Kroger connection or store setup.~~ **Fixed (Slice
+  3, 2026-07-22).** `GET /api/account` now also reports `hasStoreLocation`/`krogerConnected`;
+  `RecipesList` (the real post-sign-in landing screen) shows an onboarding banner linking to
+  Preferences/Connect-Kroger for whichever is missing, and — since a missing store guarantees
+  the job fails outright with no recipe row to attach a friendly `FailureCard` to — the submit
+  form is disabled with an inline explanation until a store is set. Kroger connection stays a
+  soft nudge only (not blocking submission), since cart-approval already degrades gracefully
+  with its own `FailureCard` when missing.
 - **No rate limiting anywhere on the API.** No `@fastify/rate-limit` or equivalent on any
   route. Real, concrete cost exposure now that signup is open (multi-tenancy, 2026-07-22):
   anyone can create an account and submit unlimited recipes, and every submission costs real
@@ -232,13 +228,16 @@ picked up.
 
 ### Architecture: multi-tenancy
 
-**Slices 1 + 2 — SHIPPED 2026-07-21/22 (code complete; needs Google Cloud credentials before
-it can actually deploy — see below).** Real per-household accounts via Google sign-in
+**Slices 1-3 — SHIPPED and DEPLOYED 2026-07-21/22, verified live** (real Google Cloud OAuth
+client created, env vars set on the `api` Railway service, migrations run against production,
+a real sign-in confirmed working end-to-end — the owner's account claimed its pre-existing
+recipes/preferences correctly). Real per-household accounts via Google sign-in
 (`src/auth/google.ts`, `src/api/routes/google_auth.ts`), replacing the single hardcoded
-`DEFAULT_USER_ID` as the only account that can ever exist, AND per-account Kroger connections +
+`DEFAULT_USER_ID` as the only account that can ever exist; per-account Kroger connections +
 store locations (`kroger_auth`/`store_locations`, migration `006_store_locations`), replacing
-the single shared Kroger cart/store every account used to hit regardless of who was signed in.
-Resolved as part of these slices:
+the single shared Kroger cart/store every account used to hit regardless of who was signed in;
+and an onboarding nudge (Slice 3) so a new account discovers it needs a store/Kroger connection
+before hitting a confusing failure, not after. Resolved as part of these slices:
 
 - ~~`POST /api/setup/device-token` is unauthenticated and unthrottled.~~ **Fixed.** The route
   no longer hardcodes `DEFAULT_USER_ID` or sets `skipAuth: true` — it's a normal authenticated
@@ -274,9 +273,15 @@ Resolved as part of these slices:
   (Slice 1) added a real front door but no exit — `POST /api/auth/signout` now revokes the
   calling session's own `device_tokens` row and clears its cookie (`request.deviceId`, set
   by `lib/auth.ts`, identifies which one), and `AppShell` got a "Sign out" button. Also
-  prompted re-scoping the Devices screen (`Setup.tsx`, `routes/setup.ts`) to the iOS Shortcut
-  specifically — manually generating a device token is redundant for browsers now that they
-  can just sign in with Google directly, which mints its own session token automatically.
+  prompted re-scoping the Devices screen (renamed `Setup.tsx` → `Account.tsx`,
+  `routes/setup.ts`) to the iOS Shortcut specifically — manually generating a device token is
+  redundant for browsers now that they can just sign in with Google directly, which mints its
+  own session token automatically. Also merged with identity + sign-out into a real Account
+  screen (`/setup` → `/account`) after the nav-bar sign-out button ran off the edge of an
+  iPhone 15 screen — a global header bar isn't the right place for an action like that.
+- ~~First-time sign-in doesn't route to Kroger connection or store setup.~~ **Fixed (Slice
+  3)** — see "Known issues" above for the detail; summarized here since it's really part of
+  the same multi-tenancy onboarding arc, not a separate concern.
 
 **Signup is open, no allowlist (2026-07-22, explicit user call: "homebrew project, don't want
 an allowlist").** Any verified Google account can create a RecipeCart account — safe
@@ -288,11 +293,12 @@ eliminate every risk** — unlimited account creation still means unlimited reci
 and each one costs real Claude API money with no rate limiting anywhere on the API (see
 "Known issues" below, still open, independent of multi-tenancy).
 
-**Before this can actually go live:** a Google Cloud OAuth client must be created (external
-action, can't be done by an agent) — see `docs/deploy-railway.md`'s "8b. Set up Google
-sign-in" step for the exact steps and the `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/
-`GOOGLE_REDIRECT_URI`/`OWNER_EMAIL` env vars that must be set on the `api` Railway service
-before deploying. Until then this is implemented and tested but not deployed.
+**Genuinely still open, not part of any slice above:** a second real account (not the owner)
+hasn't yet walked through connecting its own Kroger and adding to its own cart end-to-end —
+Slices 1-3 are deployed and code-reviewed/tested, but that specific real-usage path is still
+unverified by an actual second person. Also still open: the store-location Preferences UI
+hasn't been clicked through by a human in a real browser (built + unit-tested only), and no
+rate limiting exists on the API (see "Known issues" above).
 
 ### Testing & CI gaps
 

@@ -125,7 +125,12 @@ describe("account routes", () => {
       headers: AUTH_HEADER,
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ email: "owner@example.com", name: "Owner" });
+    expect(res.json()).toEqual({
+      email: "owner@example.com",
+      name: "Owner",
+      hasStoreLocation: false,
+      krogerConnected: false,
+    });
   });
 
   it("GET /account returns nulls for an account with no Google identity yet", async () => {
@@ -135,7 +140,37 @@ describe("account routes", () => {
       headers: AUTH_HEADER,
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ email: null, name: null });
+    expect(res.json()).toEqual({
+      email: null,
+      name: null,
+      hasStoreLocation: false,
+      krogerConnected: false,
+    });
+  });
+
+  it("GET /account reports hasStoreLocation/krogerConnected once configured", async () => {
+    await getDb()
+      .insertInto("store_locations")
+      .values({ user_id: DEFAULT_USER_ID, location_id: "loc-1", name: "Store", zip_code: "1" })
+      .execute();
+    await getDb()
+      .insertInto("kroger_auth")
+      .values({
+        id: crypto.randomUUID(),
+        user_id: DEFAULT_USER_ID,
+        encrypted_access_token: "enc-access",
+        encrypted_refresh_token: "enc-refresh",
+        expires_at: new Date(Date.now() + 3600_000),
+      })
+      .execute();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/account",
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ hasStoreLocation: true, krogerConnected: true });
   });
 
   it("GET /account rejects requests without a valid device token", async () => {

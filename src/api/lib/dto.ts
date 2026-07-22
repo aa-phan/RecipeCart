@@ -114,6 +114,13 @@ export interface MatchEditRequest {
 export interface AccountDto {
   email: string | null;
   name: string | null;
+  /** Onboarding status (multi-tenancy Slice 3, 2026-07-22) — whether this
+   * account has a store configured and/or a Kroger connection. Store is
+   * the hard-blocking one (a job fails outright with no store); Kroger is
+   * a soft nudge (cart-approval already degrades gracefully with its own
+   * FailureCard when missing). */
+  hasStoreLocation: boolean;
+  krogerConnected: boolean;
 }
 
 // ── Devices ─────────────────────────────────────────────────────────────
