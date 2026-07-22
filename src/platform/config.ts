@@ -47,6 +47,12 @@ export const config = {
     get krogerTokenKey() {
       return requireEnv("KROGER_TOKEN_KEY");
     },
+    // Shared household passphrase gating POST /api/setup/device-token
+    // (2026-07-21 security fix — that route was fully unauthenticated
+    // before this). Deliberately NOT requireEnv(): the route treats an
+    // unset value as "fail closed, reject every mint" rather than crashing
+    // unrelated CLI/API startup, matching the lazy-getter reasoning above.
+    setupSecret: process.env.SETUP_SECRET,
   },
 
   krogerRedirectUri: process.env.KROGER_REDIRECT_URI ?? "http://localhost:3000/callback",

@@ -26,13 +26,16 @@ function formatLastUsed(lastUsedAt: string | null): string {
 // placeholder until someone builds the Shortcut once and pastes its real
 // iCloud share link there; see that file's comment for why it can't be
 // generated here.
-// Minting is unauthenticated on the server side (see routes/setup.ts for
-// why that's an acceptable tradeoff for this single-household MVP). Each
+// Minting requires the shared household setup passphrase (SETUP_SECRET,
+// see routes/setup.ts's 2026-07-21 security fix) — the endpoint itself
+// stays skipAuth: true (nothing else could gate the very first token), but
+// the passphrase check happens server-side before it does anything. Each
 // mint creates a new, independently-revocable device (see DeviceDto /
 // GET /api/devices below) rather than invalidating any token issued
 // before it.
 export default function Setup() {
   const [deviceName, setDeviceName] = useState("");
+  const [setupSecret, setSetupSecret] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -67,9 +70,16 @@ export default function Setup() {
     setError(null);
     setCopied(false);
     try {
-      const result = await apiPost<DeviceTokenResponse>("/api/setup/device-token", {
-        deviceName: deviceName.trim() || undefined,
-      });
+      const result = await apiPost<DeviceTokenResponse>(
+        "/api/setup/device-token",
+        { deviceName: deviceName.trim() || undefined, setupSecret },
+        undefined,
+        // A wrong passphrase is a 401 (src/api/routes/setup.ts), but it's an
+        // inline form error, not a stale/dead session — see client.ts's
+        // comment on this option for why the global 401-redirect must be
+        // skipped here specifically.
+        { skipAuthRedirect: true },
+      );
       setToken(result.token);
       // The response just set this browser's auth cookie server-side —
       // flip the client-side "am I set up" flag AuthGate checks so
@@ -77,9 +87,11 @@ export default function Setup() {
       localStorage.setItem(AUTHED_FLAG_KEY, "1");
       fetchDevices();
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Couldn't generate a device token.",
-      );
+      if (err instanceof ApiError && err.status === 401) {
+        setError("Incorrect setup passphrase.");
+      } else {
+        setError(err instanceof ApiError ? err.message : "Couldn't generate a device token.");
+      }
     } finally {
       setGenerating(false);
     }
@@ -123,6 +135,19 @@ export default function Setup() {
       </p>
 
       <div className="setup__name-row">
+        <label htmlFor="setup-secret-input">Setup passphrase</label>
+        <input
+          id="setup-secret-input"
+          type="password"
+          value={setupSecret}
+          onChange={(e) => setSetupSecret(e.target.value)}
+          placeholder="Ask whoever set up RecipeCart for this"
+          autoComplete="off"
+          className="setup__name-input"
+        />
+      </div>
+
+      <div className="setup__name-row">
         <label htmlFor="device-name-input">Device name (optional)</label>
         <input
           id="device-name-input"
@@ -137,7 +162,7 @@ export default function Setup() {
       <button
         type="button"
         onClick={handleGenerate}
-        disabled={generating}
+        disabled={generating || setupSecret.trim().length === 0}
         className="setup__generate"
       >
         {generating ? "Generating…" : "Generate device token"}

@@ -12,6 +12,14 @@
 // instead of leaving the screen stuck on a generic error. This module isn't
 // a React component, so it can't call useNavigate(); window.location is used
 // instead, which also has the benefit of dropping any stale in-memory state.
+//
+// apiPost's optional 4th `opts.skipAuthRedirect` exists for the ONE call
+// this redirect logic doesn't apply to: Setup.tsx's device-token mint. A
+// wrong setupSecret there is a 401 too (src/api/routes/setup.ts), but it
+// means "bad passphrase," not "your session died" — an already-authed
+// browser adding a second device would otherwise get its AUTHED_FLAG_KEY
+// wiped and get bounced through a jarring full-page reload of the very
+// screen it's already on, over what's really just an inline form error.
 
 import { AUTHED_FLAG_KEY } from "../auth/AuthGate";
 
@@ -28,7 +36,7 @@ export class ApiError extends Error {
 
 type ErrorBody = { error?: { code?: string; message?: string } };
 
-async function handleResponse<T>(res: Response): Promise<T> {
+async function handleResponse<T>(res: Response, opts: { skipAuthRedirect?: boolean } = {}): Promise<T> {
   if (res.ok) {
     // 204 No Content and similar: nothing to parse.
     if (res.status === 204) return undefined as T;
@@ -44,7 +52,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
     // to the generic message below.
   }
 
-  if (res.status === 401) {
+  if (res.status === 401 && !opts.skipAuthRedirect) {
     // Only redirect once: if the flag is already cleared, a redirect from
     // an earlier failed request in this same burst is presumably already
     // in flight (window.location.href navigation isn't instantaneous), so
@@ -71,6 +79,7 @@ export async function apiPost<T>(
   path: string,
   body?: unknown,
   extraHeaders?: Record<string, string>,
+  opts?: { skipAuthRedirect?: boolean },
 ): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
@@ -89,7 +98,7 @@ export async function apiPost<T>(
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return handleResponse<T>(res);
+  return handleResponse<T>(res, opts);
 }
 
 export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {

@@ -16,6 +16,9 @@ export default defineConfig({
       // Route app code (config → getDb) at the test DB. Overridden by a real
       // TEST_DATABASE_URL from .env if set (test-setup also enforces presence).
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+      // Fixed, known value so setup.test.ts doesn't depend on the developer's
+      // local .env having a real SETUP_SECRET set (src/api/routes/setup.ts).
+      SETUP_SECRET: "test-setup-secret",
     },
   },
 });
