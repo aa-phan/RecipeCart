@@ -123,12 +123,18 @@ describe("account routes", () => {
         recipe_json: JSON.stringify({}),
       })
       .execute();
+    // recipeId === jobId by construction (see routes/recipes.ts's header
+    // comment) — the account-wipe route scopes recipes via jobs.user_id
+    // (multi-tenancy Slice 1, 2026-07-21; recipes has no user_id column of
+    // its own), so the job's id/recipe_id must actually point at the
+    // recipe above for this test to exercise that scoping realistically.
     await db
       .insertInto("jobs")
       .values({
-        id: "job-wipe-test",
+        id: "recipe-wipe-test",
         user_id: DEFAULT_USER_ID,
         source_url: "https://example.com/r",
+        recipe_id: "recipe-wipe-test",
         idempotency_key: "wipe-test-key",
       })
       .execute();

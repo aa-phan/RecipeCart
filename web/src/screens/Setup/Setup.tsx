@@ -12,23 +12,20 @@ function formatLastUsed(lastUsedAt: string | null): string {
   return lastUsedAt ? new Date(lastUsedAt).toLocaleDateString() : "Never used";
 }
 
-// Device-token setup screen (Spec 1 A1-2, WS-E Phase 4) — the SINGLE place
-// a device token is minted and applied (AuthGate just redirects here for an
-// unauthenticated visitor; see its own doc comment). Mints a fresh token
-// from POST /api/setup/device-token, which ALSO sets an HttpOnly auth
-// cookie on this response (see routes/setup.ts) — so generating a token
-// logs the current browser in immediately, no separate paste-it-back-in
-// step. The raw token is still displayed for pasting into the iOS
-// Shortcut's first-run "Paste your RecipeCart device token" prompt (see
-// docs/ios-shortcut.md §3.2) — a completely separate consumer that needs
-// the plain value, not a cookie. Below the token, an "Add Shortcut to your
-// device" button links to SHORTCUT_ICLOUD_URL (lib/shortcutConfig.ts) — a
-// placeholder until someone builds the Shortcut once and pastes its real
-// iCloud share link there; see that file's comment for why it can't be
-// generated here.
-// Minting is unauthenticated on the server side (see routes/setup.ts for
-// why that's an acceptable tradeoff for this single-household MVP). Each
-// mint creates a new, independently-revocable device (see DeviceDto /
+// Device management screen (Spec 1 A1-2, WS-E Phase 4; re-scoped by
+// multi-tenancy Slice 1, 2026-07-21). Used to be the unauthenticated
+// front door that minted the very FIRST device token for anyone who found
+// the URL — that was a real, live vulnerability (see routes/setup.ts's
+// header). screens/Login/Login.tsx (Google sign-in) is the front door now;
+// this screen is reachable only once already signed in, and mints an
+// ADDITIONAL device token for the CURRENT account — e.g. pasting one into
+// the iOS Shortcut's first-run prompt (see docs/ios-shortcut.md §3.2), a
+// completely separate consumer that needs the plain value, not a cookie.
+// Below the token, an "Add Shortcut to your device" button links to
+// SHORTCUT_ICLOUD_URL (lib/shortcutConfig.ts) — a placeholder until
+// someone builds the Shortcut once and pastes its real iCloud share link
+// there; see that file's comment for why it can't be generated here.
+// Each mint creates a new, independently-revocable device (see DeviceDto /
 // GET /api/devices below) rather than invalidating any token issued
 // before it.
 export default function Setup() {
@@ -116,9 +113,9 @@ export default function Setup() {
 
   return (
     <main className="setup">
-      <h1>Device setup</h1>
+      <h1>Manage devices</h1>
       <p>
-        Generate a device token to connect your iOS Shortcut (or this browser) to your
+        Generate a device token to connect your iOS Shortcut (or another browser) to your
         RecipeCart account.
       </p>
 

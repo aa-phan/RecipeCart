@@ -9,11 +9,11 @@ import "./AppShell.css";
 // justify more than that yet.
 //
 // Rendered INSIDE AuthGate (see App.tsx), so by the time this mounts the
-// visitor is either authed or on the one ungated route AuthGate still lets
-// through (/setup). We still hide the Preferences/Privacy/Home links on
-// /setup itself — those routes assume an authed session (they call
-// authenticated APIs), and surfacing them mid paste-a-token flow would
-// just be an extra dead end for a visitor who has no token yet.
+// visitor is authed — the one ungated route AuthGate lets an unauthenticated
+// visitor reach, /login (multi-tenancy Slice 1, 2026-07-21), never renders
+// this component at all (App.tsx's Shell wrapper skips it there). /setup is
+// authenticated-only as of that same slice, so it's a normal nav
+// destination now, not a special case needing its own hidden-nav treatment.
 export interface AppShellProps {
   children: ReactNode;
 }
@@ -49,7 +49,7 @@ export default function AppShell({ children }: AppShellProps) {
               isActive ? "app-shell__link app-shell__link--active" : "app-shell__link"
             }
           >
-            Setup
+            Devices
           </NavLink>
         </nav>
       </header>

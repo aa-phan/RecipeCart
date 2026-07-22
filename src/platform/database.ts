@@ -101,6 +101,12 @@ export interface UsersTable {
   /** device-bound bearer token, hashed at rest (Spec 4 §2.5). Nullable until
    * the API slice issues device tokens; the seeded default user has null. */
   device_token_hash: string | null;
+  /** Google's stable OIDC `sub` claim (2026-07-21 multi-tenancy Slice 1) —
+   * null until this account signs in via Google at least once. NOT email:
+   * some providers let email change/be reused, sub doesn't. */
+  google_sub: string | null;
+  email: string | null;
+  name: string | null;
   created_at: Generated<Date>;
 }
 

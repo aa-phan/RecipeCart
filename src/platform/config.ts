@@ -47,9 +47,45 @@ export const config = {
     get krogerTokenKey() {
       return requireEnv("KROGER_TOKEN_KEY");
     },
+    // Google OAuth2/OIDC client credentials (multi-tenancy Slice 1,
+    // 2026-07-21 — src/api/routes/google_auth.ts) — the login/identity
+    // mechanism, NOT an AI dependency. The "Claude is the only cloud AI
+    // dependency" rule above is specifically about AI providers (OCR/ASR/
+    // reconciliation); an OAuth identity provider for human sign-in is a
+    // different category and doesn't conflict with it.
+    get googleClientId() {
+      return requireEnv("GOOGLE_CLIENT_ID");
+    },
+    get googleClientSecret() {
+      return requireEnv("GOOGLE_CLIENT_SECRET");
+    },
   },
 
   krogerRedirectUri: process.env.KROGER_REDIRECT_URI ?? "http://localhost:3000/callback",
+
+  // Must exactly match a redirect URI registered on the Google Cloud
+  // Console OAuth client (same reasoning as krogerRedirectUri above) —
+  // src/api/routes/google_auth.ts's callback route.
+  googleRedirectUri:
+    process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3001/api/auth/google/callback",
+
+  // Email allowlist gating account auto-creation on first Google sign-in
+  // (multi-tenancy Slice 1) — without this, anyone with a Google account
+  // could create a RecipeCart account and reach the still-shared Kroger
+  // cart (per-user Kroger connections are Slice 2, not yet built). Comma-
+  // separated, trimmed, case-insensitive compare at the call site. Empty by
+  // default so a misconfigured deploy fails closed (rejects everyone)
+  // rather than silently allowing open signup.
+  allowedEmails: (process.env.ALLOWED_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0),
+
+  // The one email allowed to claim the pre-existing DEFAULT_USER_ID account
+  // (and all its existing recipes/jobs/preferences/Kroger connection) on
+  // its first Google login, instead of getting a brand-new empty account
+  // like every other allowed email. Must also be present in ALLOWED_EMAILS.
+  ownerEmail: (process.env.OWNER_EMAIL ?? "").trim().toLowerCase(),
 
   // Where to send the browser after the Kroger OAuth callback finishes
   // (src/api/routes/kroger_auth.ts). A RELATIVE redirect would resolve

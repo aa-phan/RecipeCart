@@ -1,14 +1,17 @@
 // Account data-wipe route (Phase 3 REST API, B4). DELETE /account/data does
-// a full wipe of the authenticated device's data — recipes/ingredients/
+// a full wipe of the authenticated user's data — recipes/ingredients/
 // product_matches/cart_runs (via cascade), jobs, kroger_auth, and
-// preferences — but leaves the `users` row itself intact (the device stays
-// registered, just wiped).
+// preferences — but leaves the `users` row itself intact (the account
+// stays registered, just wiped).
 //
-// KNOWN MVP SIMPLIFICATION: `recipes` (and its cascaded children) has no
-// `user_id` column — this app runs single-user (DEFAULT_USER_ID) in normal
-// operation, so "the user's data" is treated as ALL recipes. A genuinely
-// multi-user future would need a `user_id` column on `recipes` to scope this
-// deletion correctly; today it is NOT scoped per-user for that table.
+// FIXED 2026-07-21 (multi-tenancy Slice 1): `recipes` has no `user_id`
+// column of its own (see migrations/005_multi_tenant_users.ts's header for
+// why — recipes.id === jobs.id by construction, so scoping goes through
+// jobs instead of a redundant column), which used to mean this deleted
+// EVERY user's recipes, not just the caller's — a real, previously-shipped
+// bug (also the same root cause as the "delete my data wipes everyone's
+// data" Phase 7 backlog item, closed by this same fix). Now scoped via a
+// subquery through jobs.user_id.
 import type { FastifyInstance } from "fastify";
 import { getDb } from "../../platform/database.js";
 
@@ -16,8 +19,19 @@ export default async function accountRoutes(app: FastifyInstance): Promise<void>
   app.delete("/account/data", async (request, reply) => {
     await getDb().transaction().execute(async (trx) => {
       // recipes cascades to ingredients -> product_matches, and to cart_runs
-      // (see migrations/001_initial.ts). Not scoped by user_id — see header.
-      await trx.deleteFrom("recipes").execute();
+      // (see migrations/001_initial.ts). Scoped to this user's recipes via
+      // the same jobs.id === recipes.id relationship every other
+      // recipe-scoping query uses (see api/lib/ownership.ts).
+      await trx
+        .deleteFrom("recipes")
+        .where("id", "in", (eb) =>
+          eb
+            .selectFrom("jobs")
+            .select("recipe_id")
+            .where("user_id", "=", request.userId)
+            .where("recipe_id", "is not", null),
+        )
+        .execute();
 
       // jobs.recipe_id is ON DELETE SET NULL, so deleting recipes first
       // doesn't block this, but delete explicitly regardless of order for

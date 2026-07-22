@@ -40,6 +40,11 @@ import cartRoutes from "./routes/cart.js";
 // TODO(B3): uncomment once routes/kroger_auth.ts exists
 import krogerAuthRoutes from "./routes/kroger_auth.js";
 
+// Multi-tenancy Slice 1 (2026-07-21): Google sign-in, the front door for a
+// device-token session (routes/setup.ts mints ADDITIONAL tokens once
+// already signed in — this route mints the FIRST one).
+import googleAuthRoutes from "./routes/google_auth.js";
+
 // TODO(B4): uncomment once routes/preferences.ts and routes/account.ts exist
 import preferencesRoutes from "./routes/preferences.js";
 import accountRoutes from "./routes/account.js";
@@ -160,6 +165,9 @@ export async function buildServer(opts: { loggerStream?: Writable } = {}): Promi
 
   // TODO(B3): uncomment once routes/kroger_auth.ts exists
   await app.register(krogerAuthRoutes, { prefix: "/api" });
+
+  // Multi-tenancy Slice 1 (2026-07-21)
+  await app.register(googleAuthRoutes, { prefix: "/api" });
 
   // TODO(B4): uncomment once routes/preferences.ts and routes/account.ts exist
   await app.register(preferencesRoutes, { prefix: "/api" });

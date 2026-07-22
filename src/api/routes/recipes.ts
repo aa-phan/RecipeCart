@@ -11,7 +11,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { getDb } from "../../platform/database.js";
 import { enqueueJob } from "../../platform/jobs.js";
-import { notFound, badRequest } from "../lib/errors.js";
+import { badRequest } from "../lib/errors.js";
 import type {
   RecipeListItemDto,
   RecipeDetailDto,
@@ -24,6 +24,7 @@ import type {
 import type { EvidenceRef } from "../../pipeline/schema.js";
 import { editIngredient, addIngredient } from "../services/recipe_edits.js";
 import { updateMatchSelection, toMatchDto } from "../services/match_edits.js";
+import { requireOwnedJob, requireOwnedIngredient } from "../lib/ownership.js";
 
 function toIngredientDto(row: {
   id: string;
@@ -66,12 +67,14 @@ export default async function recipesRoutes(app: FastifyInstance): Promise<void>
     return response;
   });
 
-  // GET / — list all submitted recipes/jobs, most recent first.
-  app.get("/", async () => {
+  // GET / — list all of THIS user's submitted recipes/jobs, most recent
+  // first (multi-tenancy Slice 1: previously listed every user's jobs).
+  app.get("/", async (request) => {
     const db = getDb();
     const jobs = await db
       .selectFrom("jobs")
       .selectAll()
+      .where("user_id", "=", request.userId)
       .orderBy("created_at", "desc")
       .execute();
 
@@ -103,8 +106,7 @@ export default async function recipesRoutes(app: FastifyInstance): Promise<void>
     const { id } = request.params;
     const db = getDb();
 
-    const job = await db.selectFrom("jobs").selectAll().where("id", "=", id).executeTakeFirst();
-    if (!job) throw notFound("recipe");
+    const job = await requireOwnedJob(id, request.userId);
 
     const recipe = job.recipe_id
       ? await db.selectFrom("recipes").selectAll().where("id", "=", job.recipe_id).executeTakeFirst()
@@ -157,8 +159,7 @@ export default async function recipesRoutes(app: FastifyInstance): Promise<void>
     const { id } = request.params;
     const db = getDb();
 
-    const job = await db.selectFrom("jobs").selectAll().where("id", "=", id).executeTakeFirst();
-    if (!job) throw notFound("recipe");
+    const job = await requireOwnedJob(id, request.userId);
 
     if (job.recipe_id) {
       await db.deleteFrom("recipes").where("id", "=", job.recipe_id).execute();
@@ -173,10 +174,8 @@ export default async function recipesRoutes(app: FastifyInstance): Promise<void>
   // bypassing the normal submit-dedup window (Phase 3 plan ambiguity A6).
   app.post("/:id/reprocess", async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
     const { id } = request.params;
-    const db = getDb();
 
-    const job = await db.selectFrom("jobs").selectAll().where("id", "=", id).executeTakeFirst();
-    if (!job) throw notFound("recipe");
+    const job = await requireOwnedJob(id, request.userId);
 
     const { job: newJob, created } = await enqueueJob(job.source_url, request.userId, {
       bypassDedup: true,
@@ -201,6 +200,7 @@ export default async function recipesRoutes(app: FastifyInstance): Promise<void>
       reply,
     ) => {
       const { ingredientId } = request.params;
+      await requireOwnedIngredient(ingredientId, request.userId);
       const edit = request.body ?? {};
       const result = await editIngredient(ingredientId, edit);
       if (result === null) {
@@ -222,10 +222,8 @@ export default async function recipesRoutes(app: FastifyInstance): Promise<void>
       reply,
     ) => {
       const { id } = request.params;
-      const db = getDb();
 
-      const job = await db.selectFrom("jobs").selectAll().where("id", "=", id).executeTakeFirst();
-      if (!job) throw notFound("recipe");
+      const job = await requireOwnedJob(id, request.userId);
       if (!job.recipe_id) throw badRequest("Recipe has no ingredients yet — still processing.");
 
       const body = request.body ?? {};
@@ -254,6 +252,7 @@ export default async function recipesRoutes(app: FastifyInstance): Promise<void>
       }>,
     ) => {
       const { ingredientId } = request.params;
+      await requireOwnedIngredient(ingredientId, request.userId);
       const body = request.body ?? {};
       const selectedProductId =
         body.selectedProductId === undefined ? null : body.selectedProductId;

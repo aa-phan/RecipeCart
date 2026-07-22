@@ -133,6 +133,11 @@ handshake.
 | `KROGER_REDIRECT_URI` | Yes | No | Only the API process builds the Kroger auth URL and handles the callback. Must exactly match what's registered in the Kroger developer dashboard — see step 8. |
 | `KROGER_TOKEN_KEY` | Yes | Yes | Symmetric key encrypting the stored Kroger token pair at rest. Both processes read/write the encrypted token file, so both need it. **Must be a distinct value from any DB credential** (Spec 4 §7 item 5) — it is a separate secret generated independently, never reused from `DATABASE_URL` or Postgres creds. |
 | `DATA_DIR` | Yes (if used) | Yes | Local data dir for the encrypted Kroger token file and temp media. On Railway, this should point inside the attached volume (see step 3) for `worker` at minimum, since that's where temp media and the token file live persistently. |
+| `GOOGLE_CLIENT_ID` | Yes | No | Only the API process handles the Google sign-in start/callback routes (`src/api/routes/google_auth.ts`, multi-tenancy Slice 1). |
+| `GOOGLE_CLIENT_SECRET` | Yes | No | Same reasoning as `GOOGLE_CLIENT_ID`. |
+| `GOOGLE_REDIRECT_URI` | Yes | No | Must exactly match a redirect URI registered on the Google Cloud Console OAuth client. **Must be set before this feature works at all** — see the "Multi-tenancy Slice 1" step below. |
+| `ALLOWED_EMAILS` | Yes | No | Comma-separated allowlist gating account creation on first Google login. **Must be set before going live** — unset means everyone is rejected (fails closed), not that signup is open. |
+| `OWNER_EMAIL` | Yes | No | The one allowlisted email that claims the pre-existing single-tenant account (and all its data) on its first login instead of starting fresh. |
 | `WEB_APP_URL` | Yes | No | Only the API's OAuth callback route redirects here after token exchange (`src/api/routes/kroger_auth.ts`, `config.webAppUrl`). **Resolved (this session): the `api` service serves the built web app itself** via `@fastify/static` (`src/api/server.ts`) — the Dockerfile's builder stage now runs `cd web && npm ci && npm run build` and the runtime stage copies `web/dist` in alongside `dist/`. So `WEB_APP_URL` is simply the `api` service's own production URL, not a separate domain — set it once `api`'s domain is known (step 7). |
 | `PORT` | Yes | No | Railway injects this automatically for the `api` service and expects the process to bind it (`src/api/index.ts` reads `config.apiPort`, which falls back through `API_PORT` then `3001`). The worker doesn't listen on a port, so leave this unset for `worker`. |
 | `TEST_DATABASE_URL` | **No** | **No** | Dev/CI-only. Do not set in either production service. |
@@ -297,6 +302,37 @@ P1 CLI callback server on `:3000/callback`):
 
 Update both in the same sitting — don't leave one stale while changing the
 other.
+
+### 8b. Set up Google sign-in (multi-tenancy Slice 1, 2026-07-21)
+
+**This is a required step, not optional** — without it, `/login` (the
+entry point for anyone whose device token isn't already valid — see
+`web/src/auth/AuthGate.tsx`) is broken for any new sign-in, even though
+already-authenticated existing sessions/devices are unaffected. Do this
+before merging/deploying the multi-tenancy Slice 1 code, not after.
+
+1. In Google Cloud Console (console.cloud.google.com), create (or reuse) a
+   project, then **APIs & Services > OAuth consent screen** — External
+   user type is fine for a small allowlisted group; fill in the minimum
+   required fields (app name, support email). No Google review needed at
+   this scale/scope (`openid email profile` are non-sensitive scopes).
+2. **APIs & Services > Credentials > Create Credentials > OAuth client
+   ID**, application type **Web application**. Add an **Authorized
+   redirect URI**:
+   ```
+   https://<api-production-domain>/api/auth/google/callback
+   ```
+   matching `GOOGLE_REDIRECT_URI` exactly — same char-for-char discipline
+   as the Kroger redirect URI above.
+3. Set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`GOOGLE_REDIRECT_URI` on
+   the Railway `api` service (step 5's env var pass, or after the fact via
+   `railway variables --service <api-service-name> --set "KEY=value"`).
+4. Set `ALLOWED_EMAILS` (comma-separated) and `OWNER_EMAIL` (one of those
+   emails — the one that should inherit the existing single-tenant
+   account's data on its first login) on the same service. **Do not skip
+   this** — an unset `ALLOWED_EMAILS` fails closed (rejects everyone), so
+   the visible symptom of forgetting this step is "nobody, including the
+   owner, can sign in," not an open door.
 
 ### 9. Set up an external uptime monitor on `/health` (A4-5, Spec 4 §7 item 9)
 

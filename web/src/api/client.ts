@@ -5,13 +5,15 @@
 // error handler) so callers can branch on `.code` without parsing raw JSON.
 //
 // 401 responses get one extra step: they mean the token AuthGate let through
-// has since gone stale (revoked, or invalidated by another device under the
-// old single-slot design) — not something any individual screen can recover
-// from. handleResponse() clears the same AUTHED_FLAG_KEY AuthGate reads and
-// does a full page navigation to /setup, so a stale-token 401 self-heals
-// instead of leaving the screen stuck on a generic error. This module isn't
-// a React component, so it can't call useNavigate(); window.location is used
-// instead, which also has the benefit of dropping any stale in-memory state.
+// has since gone stale (revoked, or the account's session expired) — not
+// something any individual screen can recover from. handleResponse() clears
+// the same AUTHED_FLAG_KEY AuthGate reads and does a full page navigation to
+// /login (multi-tenancy Slice 1, 2026-07-21 — was /setup before that slice
+// made /setup an authenticated-only "add another device" screen), so a
+// stale-token 401 self-heals instead of leaving the screen stuck on a
+// generic error. This module isn't a React component, so it can't call
+// useNavigate(); window.location is used instead, which also has the
+// benefit of dropping any stale in-memory state.
 
 import { AUTHED_FLAG_KEY } from "../auth/AuthGate";
 
@@ -51,7 +53,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
     // skip triggering another one.
     if (typeof window !== "undefined" && localStorage.getItem(AUTHED_FLAG_KEY) !== null) {
       localStorage.removeItem(AUTHED_FLAG_KEY);
-      window.location.href = "/setup";
+      window.location.href = "/login";
     }
   }
 

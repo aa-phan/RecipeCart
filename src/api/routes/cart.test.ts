@@ -55,7 +55,7 @@ const CANDIDATE = {
   quantityToOrder: 1,
 };
 
-async function seedRecipeWithApprovedMatch(opts: { withJobRow?: boolean } = {}): Promise<void> {
+async function seedRecipeWithApprovedMatch(): Promise<void> {
   const db = getDb();
   await db
     .insertInto("recipes")
@@ -67,22 +67,25 @@ async function seedRecipeWithApprovedMatch(opts: { withJobRow?: boolean } = {}):
       recipe_json: JSON.stringify({}),
     })
     .execute();
-  if (opts.withJobRow) {
-    // recipeId === jobId by construction (see recipes.ts's header comment) —
-    // matches how a real job row looks once it reaches awaiting_review.
-    await db
-      .insertInto("jobs")
-      .values({
-        id: "recipe-1",
-        user_id: DEFAULT_USER_ID,
-        source_url: "https://example.com/recipe",
-        recipe_id: "recipe-1",
-        status: "awaiting_review",
-        stage: "awaiting_review",
-        idempotency_key: "seed-job-recipe-1",
-      })
-      .execute();
-  }
+  // recipeId === jobId by construction (see recipes.ts's header comment) —
+  // matches how a real job row looks once it reaches awaiting_review.
+  // Required unconditionally as of multi-tenancy Slice 1 (2026-07-21):
+  // cart.ts now verifies recipe ownership via jobs.user_id
+  // (api/lib/ownership.ts) before doing anything, so a recipe with no
+  // matching job row 404s immediately — exactly like production, where a
+  // recipe never exists without one.
+  await db
+    .insertInto("jobs")
+    .values({
+      id: "recipe-1",
+      user_id: DEFAULT_USER_ID,
+      source_url: "https://example.com/recipe",
+      recipe_id: "recipe-1",
+      status: "awaiting_review",
+      stage: "awaiting_review",
+      idempotency_key: "seed-job-recipe-1",
+    })
+    .execute();
   await db
     .insertInto("ingredients")
     .values({
@@ -171,7 +174,7 @@ describe("cart routes", () => {
       // app's CartProgress screen (which polls GET /recipes/:id, i.e.
       // jobs.status) kept showing "processing" forever even after the cart
       // run genuinely finished.
-      await seedRecipeWithApprovedMatch({ withJobRow: true });
+      await seedRecipeWithApprovedMatch();
       const res = await app.inject({
         method: "POST",
         url: "/api/recipes/recipe-1/cart:approve",
@@ -230,7 +233,7 @@ describe("cart routes", () => {
     // web/src/lib/failureCards.ts's purpose-built kroger_* cards actually
     // render instead of falling through to the generic fallback card.
     it("persists kroger_not_connected when there's no stored Kroger token at all", async () => {
-      await seedRecipeWithApprovedMatch({ withJobRow: true });
+      await seedRecipeWithApprovedMatch();
       loadTokenMock.mockReturnValue(null);
 
       const res = await app.inject({
@@ -252,7 +255,7 @@ describe("cart routes", () => {
     });
 
     it("persists kroger_token_expired when a stored token gets a 401 from Kroger mid-run", async () => {
-      await seedRecipeWithApprovedMatch({ withJobRow: true });
+      await seedRecipeWithApprovedMatch();
       addToCartMock.mockResolvedValue({ ok: false, status: 401, reason: "invalid_token" });
 
       const res = await app.inject({
@@ -274,7 +277,7 @@ describe("cart routes", () => {
     });
 
     it("does not persist a failure_class for an ordinary completed run", async () => {
-      await seedRecipeWithApprovedMatch({ withJobRow: true });
+      await seedRecipeWithApprovedMatch();
 
       const res = await app.inject({
         method: "POST",

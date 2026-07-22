@@ -9,6 +9,7 @@ import type { CartItemResult, CartRunStatus } from "../../kroger/cart_runner.js"
 import { runCartApproval } from "../../kroger/cart_runner.js";
 import { buildApprovedItems } from "../lib/cart_selection.js";
 import { finishJob, setRecipeFailureClass } from "../../platform/jobs.js";
+import { requireOwnedJob } from "../lib/ownership.js";
 
 export default async function cartRoutes(app: FastifyInstance): Promise<void> {
   // POST /recipes/:id/cart:approve — runs (or idempotently replays/resumes)
@@ -20,6 +21,7 @@ export default async function cartRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const recipeId = (request.params as { id: string }).id;
+    await requireOwnedJob(recipeId, request.userId);
     const approvedItems = await buildApprovedItems(recipeId);
     const result = await runCartApproval(recipeId, approvedItems, idempotencyKey);
 
@@ -55,6 +57,7 @@ export default async function cartRoutes(app: FastifyInstance): Promise<void> {
   // GET /recipes/:id/cart — the most recent cart_runs row for this recipe.
   app.get("/recipes/:id/cart", async (request) => {
     const recipeId = (request.params as { id: string }).id;
+    await requireOwnedJob(recipeId, request.userId);
     const row = await getDb()
       .selectFrom("cart_runs")
       .selectAll()

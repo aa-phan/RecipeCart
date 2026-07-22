@@ -5,6 +5,23 @@ import AppShell from "./components/AppShell/AppShell";
 
 const KROGER_RESUME_STORAGE_KEY = "krogerConnectResumeRecipeId";
 
+/** Strips `?loggedIn=true` after a Google sign-in round trip (multi-tenancy
+ * Slice 1, 2026-07-21) — AuthGate.tsx's isAuthed() already flips the
+ * AUTHED_FLAG_KEY flag synchronously during render (see its comment for
+ * why that can't wait for an effect), so this just tidies the URL,
+ * mirroring useKrogerConnectResume's `?krogerConnected=true` handling
+ * below. */
+function useGoogleLoginResume(): void {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("loggedIn") !== "true") return;
+    navigate("/", { replace: true });
+  }, [location.search, navigate]);
+}
+
 /** Completes the Kroger connect/reconnect resume round trip (Phase 5 fix):
  * the OAuth callback (src/api/routes/kroger_auth.ts) is server-side and
  * can't see the client-only sessionStorage value ConnectKroger.tsx wrote
@@ -53,13 +70,15 @@ const ConnectKroger = React.lazy(() => import("./screens/ConnectKroger/ConnectKr
 const Preferences = React.lazy(() => import("./screens/Preferences/Preferences"));
 const Privacy = React.lazy(() => import("./screens/Privacy/Privacy"));
 const Setup = React.lazy(() => import("./screens/Setup/Setup"));
+const Login = React.lazy(() => import("./screens/Login/Login"));
 
-// /setup is the one route AuthGate lets an unauthenticated visitor reach
-// (see auth/AuthGate.tsx UNGATED_PATHS) — it's the paste-a-token screen,
-// so nav chrome pointing at authed-only routes (Preferences, Privacy, Home)
-// would just be dead ends there. Every other route already implies an
-// authed session, so the shell renders everywhere else.
-const SHELL_LESS_PATHS = new Set(["/setup"]);
+// /login is the one route AuthGate lets an unauthenticated visitor reach
+// (see auth/AuthGate.tsx UNGATED_PATHS, multi-tenancy Slice 1 2026-07-21)
+// — nav chrome pointing at authed-only routes (Preferences, Privacy, Home)
+// would just be dead ends there. /setup is now authenticated-only (adding
+// an additional device), so every other route — including /setup — already
+// implies a signed-in session and gets the shell.
+const SHELL_LESS_PATHS = new Set(["/login"]);
 
 function Shell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -69,6 +88,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   useKrogerConnectResume();
+  useGoogleLoginResume();
 
   return (
     <AuthGate>
@@ -84,6 +104,7 @@ export default function App() {
             <Route path="/preferences" element={<Preferences />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/setup" element={<Setup />} />
+            <Route path="/login" element={<Login />} />
           </Routes>
         </Suspense>
       </Shell>

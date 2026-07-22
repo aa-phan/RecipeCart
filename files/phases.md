@@ -221,46 +221,43 @@ picked up.
 
 ### Architecture: multi-tenancy
 
-- **Multi-tenant architecture, generally — including closing `POST /api/setup/device-token`'s
-  open mint.** Everything today is single-user/single-household by explicit MVP choice — one
-  `users` row, one Kroger store config, one set of preferences. Real multi-tenancy (multiple
-  independent users/households, each with their own recipes, store, Kroger auth, preferences)
-  is a genuine architecture project, not a small patch: touches the schema (`users`/
-  `recipes`/`jobs`/etc. all need real tenant scoping, not an assumed single row), auth (who's
-  allowed to see/act on what), and every single-slot assumption baked into Phases 1–6 (see the
-  next item). **This is deliberately the fix path for the device-token mint endpoint too**
-  (`src/api/routes/setup.ts` — `skipAuth: true`, no gate at all, its own comment already
-  flags this as needing "an authenticated admin session... before onboarding any untrusted
-  user"): a real per-user auth layer built here supersedes the endpoint's current wide-open
-  state, rather than bolting on a separate shared-passphrase mechanism first and
-  throwing it away once real auth lands. **Known tradeoff, explicit user call (2026-07-21):**
-  until this ships, the endpoint stays genuinely exploitable — anyone who finds the URL can
-  mint a device token with full account access (all recipes/preferences, and cart-approval
-  against the real connected Kroger account). A standalone interim gate (shared setup
-  passphrase) was built, deployed, and verified working, then deliberately reverted
-  (commits `341b25b`/`384f69c`) in favor of doing it once, correctly, here — prioritize this
-  item accordingly, not as a someday-nice-to-have.
-- **Device/browser tokens are minted per-surface, not per-user.** Related to the above, but a
-  narrower, concrete symptom of it: using the web app from a browser vs. the iOS
-  Shortcut/PWA currently requires separately minting a device token for each surface
-  (`device_tokens` table, one row per device — see the 2026-07-20 device-token fix in Phase
-  4/architecture history) rather than one identity that just works across surfaces. That
-  device-token fix deliberately only solved "one mint no longer logs out every other device"
-  (real per-device rows instead of a single nullable column) — it did NOT solve "log in once,
-  use anywhere without re-minting," which is really the same underlying gap as full
-  multi-tenancy: there's no real user-identity/session layer yet, just per-device tokens
-  against a single implicit user. A real fix likely wants an actual auth layer (login,
-  session/identity independent of "device") as part of the same multi-tenancy work, not a
-  bolt-on.
-- **"Delete my data" actually deletes everyone's data.** `DELETE /api/account/data`
-  (`src/api/routes/account.ts`) correctly cascades recipes → ingredients/product_matches/
-  cart_runs, plus jobs/`kroger_auth`/preferences — but `recipes` has no `user_id` column at
-  all, so the deletion isn't scoped to a single user in the current single-tenant schema; it
-  wipes recipe data for the whole app. The Privacy screen's wording implies personal-data
-  deletion; real behavior today is closer to "reset the whole app." A sharp, mostly-hidden
-  edge of the same single-tenant schema gap — will need fixing as part of real multi-tenancy,
-  not in isolation (a bolted-on `user_id` check without real tenant scoping elsewhere would
-  be a false sense of safety).
+**Slice 1 — SHIPPED 2026-07-21 (code complete; needs Google Cloud credentials before it can
+actually deploy — see below).** Real per-household accounts via Google sign-in
+(`src/auth/google.ts`, `src/api/routes/google_auth.ts`), replacing the single hardcoded
+`DEFAULT_USER_ID` as the only account that can ever exist. Resolved as part of this slice:
+
+- ~~`POST /api/setup/device-token` is unauthenticated and unthrottled.~~ **Fixed.** The route
+  no longer hardcodes `DEFAULT_USER_ID` or sets `skipAuth: true` — it's a normal authenticated
+  route now (`request.userId`), used only to add an *additional* device once already signed in
+  via Google. The standalone shared-passphrase gate built earlier the same day was explicitly
+  reverted in favor of this real fix rather than shipping throwaway work (commits
+  `341b25b`/`384f69c` reverted it; `google_auth.ts` + the `setup.ts` rewrite are the real fix).
+- ~~"Delete my data" actually deletes everyone's data.~~ **Fixed.** `account.ts`'s
+  `deleteFrom("recipes")` is now scoped via a subquery through `jobs.user_id` (recipes has no
+  `user_id` column of its own — `recipes.id === jobs.id` by construction, so scoping goes
+  through the job instead of a redundant column; see `migrations/005_multi_tenant_users.ts`'s
+  header and `api/lib/ownership.ts`).
+- **New, closed in the same pass, not previously tracked as its own item:** `recipes.ts`
+  (`GET /`, `GET /:id`, `DELETE /:id`, the ingredient/match PATCH routes) and `cart.ts` (both
+  routes) used to trust a URL id alone with no ownership check at all — any authenticated
+  caller could read/edit/delete/approve-cart-for ANY user's recipe, not just their own. Fixed
+  via `api/lib/ownership.ts`'s `requireOwnedJob`/`requireOwnedIngredient`, with real regression
+  tests in `recipes.test.ts` proving cross-tenant isolation.
+- Device/browser tokens being minted per-surface (adding the Shortcut vs. a browser) is
+  unaffected by this slice and remains true by design — that was never the actual problem;
+  the problem was that every token pointed at the same one account regardless of who was
+  signing in. Real per-user identity now exists underneath the same per-device-token model.
+
+**Explicitly still open (Slice 2, not yet started):** Kroger OAuth connection and store
+location are still single-slot/shared across every account — `kroger_auth`/`store_config.ts`
+untouched by Slice 1. Every account currently shares ONE real Kroger cart and ONE store.
+**Don't invite a second real household to actually approve carts until Slice 2 lands.**
+
+**Before Slice 1 can actually go live:** a Google Cloud OAuth client must be created (external
+action, can't be done by an agent) — see `docs/deploy-railway.md`'s "8b. Set up Google
+sign-in" step for the exact steps and the `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/
+`GOOGLE_REDIRECT_URI`/`ALLOWED_EMAILS`/`OWNER_EMAIL` env vars that must be set on the `api`
+Railway service before deploying. Until then this is implemented and tested but not deployed.
 
 ### Testing & CI gaps
 
