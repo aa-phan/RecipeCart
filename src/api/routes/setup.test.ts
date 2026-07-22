@@ -63,7 +63,7 @@ describe("POST /api/setup/device-token", () => {
     expect(row.device_name).toBe("My Phone");
   });
 
-  it("defaults device name to 'Unnamed device' when omitted", async () => {
+  it("defaults device name to 'iOS Shortcut' when omitted", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/setup/device-token",
@@ -71,7 +71,7 @@ describe("POST /api/setup/device-token", () => {
       payload: {},
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().device.deviceName).toBe("Unnamed device");
+    expect(res.json().device.deviceName).toBe("iOS Shortcut");
   });
 
   it("defaults device name when an empty string is given", async () => {
@@ -82,7 +82,7 @@ describe("POST /api/setup/device-token", () => {
       payload: { deviceName: "   " },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().device.deviceName).toBe("Unnamed device");
+    expect(res.json().device.deviceName).toBe("iOS Shortcut");
   });
 
   it("does NOT invalidate the existing token — both remain valid", async () => {
@@ -118,17 +118,19 @@ describe("POST /api/setup/device-token", () => {
     expect(mintedWorks.statusCode).toBe(200);
   });
 
-  it("sets the HttpOnly device-token cookie", async () => {
+  // Re-scoped 2026-07-22: this route is now specifically "get a token for
+  // the Shortcut," minted from a browser that's already authenticated some
+  // other way. It must NOT swap that browser's own session cookie to the
+  // freshly-minted token — the calling browser should stay on whatever
+  // session it already had.
+  it("does NOT set a cookie — the calling browser's own session is untouched", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/setup/device-token",
       headers: AUTH_HEADER,
       payload: {},
     });
-    const setCookie = res.headers["set-cookie"];
-    expect(setCookie).toBeDefined();
-    expect(String(setCookie)).toContain("recipecart_device_token=");
-    expect(String(setCookie).toLowerCase()).toContain("httponly");
+    expect(res.headers["set-cookie"]).toBeUndefined();
   });
 
   // The actual point of the multi-tenancy Slice 1 rewrite: minting used to

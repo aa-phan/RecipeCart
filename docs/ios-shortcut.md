@@ -27,15 +27,16 @@ is a confirmation within 2 seconds of the share tap (Spec 1 §2.2).
 
 ## 2. Prerequisites
 
-- **A device token.** Visit `/setup` on the deployed web app (e.g.
-  `https://<your-production-domain>/setup`) and click "Generate device
-  token." This mints a fresh token, displays it once for copying, and —
-  as of this session — also logs the browser you're viewing it in in
-  automatically (it sets an HttpOnly auth cookie server-side in the same
-  response, so there's no separate paste-it-back-in step for the browser).
-  Keep this value handy — you'll paste it into the Shortcut's first-run
-  prompt (§3.2 below) the first time you run it on your device, since a
-  Shortcut can't read a browser cookie.
+- **A Shortcut token.** First sign in to the deployed web app with Google
+  (`https://<your-production-domain>/login`) — `/setup` is authenticated-only
+  as of multi-tenancy Slice 1, so this step comes first, not `/setup`
+  itself. Once signed in, visit `/setup` (nav: "Devices") and click
+  "Generate Shortcut token." This mints a fresh token and displays it once
+  for copying. It does NOT sign this browser in or change its own session
+  in any way (2026-07-22 re-scoping) — it exists purely to hand a raw
+  token to the Shortcut, which can't do a browser sign-in or read a
+  cookie itself. Keep the value handy — you'll paste it into the
+  Shortcut's first-run prompt (§3.2 below).
 
   A CLI fallback still exists if you have shell access to the machine
   running the API (`npm run cli -- create-device-token`, or `node

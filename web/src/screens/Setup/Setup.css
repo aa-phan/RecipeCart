@@ -162,6 +162,12 @@
   margin: 0;
 }
 
+.setup__devices-hint {
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-3);
+}
+
 .setup__devices-list {
   list-style: none;
   margin: 0;

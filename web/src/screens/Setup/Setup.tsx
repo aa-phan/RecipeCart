@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { apiPost, apiGet, apiDelete, ApiError } from "../../api/client";
 import type { DeviceDto } from "../../api/types";
-import { AUTHED_FLAG_KEY } from "../../auth/AuthGate";
 import { SHORTCUT_ICLOUD_URL } from "../../lib/shortcutConfig";
 import "./Setup.css";
 
@@ -12,22 +11,28 @@ function formatLastUsed(lastUsedAt: string | null): string {
   return lastUsedAt ? new Date(lastUsedAt).toLocaleDateString() : "Never used";
 }
 
-// Device management screen (Spec 1 A1-2, WS-E Phase 4; re-scoped by
-// multi-tenancy Slice 1, 2026-07-21). Used to be the unauthenticated
-// front door that minted the very FIRST device token for anyone who found
-// the URL — that was a real, live vulnerability (see routes/setup.ts's
-// header). screens/Login/Login.tsx (Google sign-in) is the front door now;
-// this screen is reachable only once already signed in, and mints an
-// ADDITIONAL device token for the CURRENT account — e.g. pasting one into
-// the iOS Shortcut's first-run prompt (see docs/ios-shortcut.md §3.2), a
-// completely separate consumer that needs the plain value, not a cookie.
-// Below the token, an "Add Shortcut to your device" button links to
-// SHORTCUT_ICLOUD_URL (lib/shortcutConfig.ts) — a placeholder until
-// someone builds the Shortcut once and pastes its real iCloud share link
-// there; see that file's comment for why it can't be generated here.
-// Each mint creates a new, independently-revocable device (see DeviceDto /
-// GET /api/devices below) rather than invalidating any token issued
-// before it.
+// Devices/sessions screen (Spec 1 A1-2, WS-E Phase 4; re-scoped by
+// multi-tenancy Slice 1, 2026-07-21; narrowed to the Shortcut specifically,
+// 2026-07-22). Used to be the unauthenticated front door that minted the
+// very FIRST device token for anyone who found the URL — that was a real,
+// live vulnerability (see routes/setup.ts's header). screens/Login/
+// Login.tsx (Google sign-in) is the front door now; this screen is
+// reachable only once already signed in.
+//
+// Two genuinely different things live on this one screen:
+//   1. Minting a token for the iOS Shortcut — the ONE remaining real use
+//      case for a manual token, since the Shortcut can't do a browser
+//      OAuth redirect or read an HttpOnly cookie (see docs/ios-shortcut.md
+//      §3.2). A new BROWSER should just sign in with Google directly
+//      instead of generating a token here — that already mints its own
+//      session automatically (google_auth.ts). Below the token, an "Add
+//      Shortcut to your device" button links to SHORTCUT_ICLOUD_URL
+//      (lib/shortcutConfig.ts) — a placeholder until someone builds the
+//      Shortcut once and pastes its real iCloud share link there; see
+//      that file's comment for why it can't be generated here.
+//   2. Managing active sessions (GET/DELETE /api/devices) — every browser
+//      you've signed into via Google AND every Shortcut token you've
+//      minted show up in the same list, independently revocable.
 export default function Setup() {
   const [deviceName, setDeviceName] = useState("");
   const [token, setToken] = useState<string | null>(null);
@@ -64,18 +69,18 @@ export default function Setup() {
     setError(null);
     setCopied(false);
     try {
+      // Deliberately does NOT touch this browser's own session — as of the
+      // 2026-07-22 re-scoping, the backend no longer sets a cookie on this
+      // response (see routes/setup.ts). This mint exists purely to hand a
+      // raw token to the Shortcut, not to re-authenticate this browser.
       const result = await apiPost<DeviceTokenResponse>("/api/setup/device-token", {
         deviceName: deviceName.trim() || undefined,
       });
       setToken(result.token);
-      // The response just set this browser's auth cookie server-side —
-      // flip the client-side "am I set up" flag AuthGate checks so
-      // navigating away doesn't bounce back here.
-      localStorage.setItem(AUTHED_FLAG_KEY, "1");
       fetchDevices();
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Couldn't generate a device token.",
+        err instanceof ApiError ? err.message : "Couldn't generate a Shortcut token.",
       );
     } finally {
       setGenerating(false);
@@ -113,20 +118,21 @@ export default function Setup() {
 
   return (
     <main className="setup">
-      <h1>Manage devices</h1>
+      <h1>Devices</h1>
       <p>
-        Generate a device token to connect your iOS Shortcut (or another browser) to your
-        RecipeCart account.
+        Using RecipeCart from a new browser? Just sign in with Google there directly — it
+        connects itself automatically. Generating a token below is only for the iOS
+        Shortcut, which can't sign in with Google on its own.
       </p>
 
       <div className="setup__name-row">
-        <label htmlFor="device-name-input">Device name (optional)</label>
+        <label htmlFor="device-name-input">Shortcut name (optional)</label>
         <input
           id="device-name-input"
           type="text"
           value={deviceName}
           onChange={(e) => setDeviceName(e.target.value)}
-          placeholder="e.g. iPhone Shortcut, MacBook Safari"
+          placeholder="e.g. iPhone Shortcut, Work iPhone"
           className="setup__name-input"
         />
       </div>
@@ -137,7 +143,7 @@ export default function Setup() {
         disabled={generating}
         className="setup__generate"
       >
-        {generating ? "Generating…" : "Generate device token"}
+        {generating ? "Generating…" : "Generate Shortcut token"}
       </button>
 
       {error && (
@@ -148,7 +154,7 @@ export default function Setup() {
 
       {token && (
         <div className="setup__result">
-          <label htmlFor="device-token-value">Your device token</label>
+          <label htmlFor="device-token-value">Your Shortcut token</label>
           <div className="setup__token-row">
             <input
               id="device-token-value"
@@ -163,15 +169,14 @@ export default function Setup() {
           </div>
 
           <p className="setup__instructions">
-            This browser is now signed in — no further steps needed here. If you're
-            also setting up the iOS Shortcut, copy this token and paste it into the
-            Shortcut's first-run prompt — see the setup guide (
-            <code>docs/ios-shortcut.md</code>) for details on building the Shortcut.
+            Copy this and paste it into the Shortcut's first-run prompt — see the setup
+            guide (<code>docs/ios-shortcut.md</code>) for details on building the
+            Shortcut.
           </p>
 
           <p className="setup__note">
-            This adds a new device to your account — it doesn't affect any device
-            already signed in. Manage or revoke devices below at any time.
+            This doesn't affect this browser's own session, or any other device already
+            signed in. Manage or revoke sessions below at any time.
           </p>
 
           <div className="setup__shortcut">
@@ -197,13 +202,17 @@ export default function Setup() {
           </div>
 
           <Link to="/" className="setup__continue">
-            Continue to RecipeCart →
+            Back to RecipeCart →
           </Link>
         </div>
       )}
 
       <section className="setup__devices">
-        <h2>Your devices</h2>
+        <h2>Active sessions</h2>
+        <p className="setup__devices-hint">
+          Every browser you've signed into with Google, plus any Shortcut tokens you've
+          generated. Revoke one to sign it out immediately.
+        </p>
 
         {devicesError && (
           <p className="setup__error" role="alert">
@@ -212,7 +221,7 @@ export default function Setup() {
         )}
 
         {devicesLoading && !devices ? (
-          <p className="setup__devices-loading">Loading your devices…</p>
+          <p className="setup__devices-loading">Loading your sessions…</p>
         ) : devices && devices.length > 0 ? (
           <ul className="setup__devices-list">
             {devices.map((device) => (
