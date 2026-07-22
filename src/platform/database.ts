@@ -162,6 +162,14 @@ export interface PreferencesTable {
   updated_at: Generated<Date>;
 }
 
+export interface StoreLocationsTable {
+  user_id: string;
+  location_id: string;
+  name: string;
+  zip_code: string;
+  updated_at: Generated<Date>;
+}
+
 export interface DeviceTokensTable {
   id: string;
   user_id: string;
@@ -188,6 +196,7 @@ export interface DB {
   kroger_auth: KrogerAuthTable;
   preferences: PreferencesTable;
   device_tokens: DeviceTokensTable;
+  store_locations: StoreLocationsTable;
 }
 
 // ── Instance (lazy singleton, mirrors the old getDb() shape) ───────────────

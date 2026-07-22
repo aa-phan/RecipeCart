@@ -89,6 +89,43 @@
   margin: 0 0 var(--space-3);
 }
 
+.preferences__store-current {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-ink);
+  margin: 0 0 var(--space-3);
+}
+
+.preferences__store-field {
+  margin-bottom: 0;
+}
+
+.preferences__store-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.preferences__store-row input {
+  flex: 1;
+  max-width: 160px;
+}
+
+.preferences__store-save {
+  border: 1px solid var(--color-cart-blue);
+  background: var(--color-cart-blue);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.preferences__store-save:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .theme-toggle {
   display: inline-flex;
   border: 1px solid var(--color-border);

@@ -1,15 +1,22 @@
-// Kroger OAuth2 callback route plugin (Phase 3, B3 slice — Spec 4 §2.5).
+// Kroger OAuth2 callback route plugin (Phase 3, B3 slice — Spec 4 §2.5;
+// per-user threading added multi-tenancy Slice 2, 2026-07-22).
 // Registered with prefix `/api` in server.ts, so paths below are
 // `GET /api/kroger/auth/start` and `GET /api/kroger/auth/callback`.
 //
-// Both routes are unauthenticated (`config: { skipAuth: true }`) BY
-// NECESSITY: this is a browser redirect flow through Kroger's own consent
-// page, which can't carry a device-token bearer header. That means, in this
-// MVP model, connecting a Kroger account does not require the app's own
-// device auth to already be established — a deliberate but real tradeoff,
-// not one to silently smooth over. A production hardening pass might tie
-// `/start` to an existing device-token session (e.g. via a short-lived
-// cookie) before allowing the redirect, but that's out of scope here.
+// `/start` requires normal device-token auth (cookie or bearer) as of
+// Slice 2 — connecting Kroger now needs to know WHICH account is
+// connecting, so the account's own store/cart stop landing on
+// DEFAULT_USER_ID regardless of who's actually signed in. `ConnectKroger.tsx`
+// already navigates here via a plain `<a href="/api/kroger/auth/start">`
+// browser click, which carries the session cookie same as any other
+// same-origin navigation — no frontend change needed for this.
+//
+// `/callback` STAYS `skipAuth: true` BY NECESSITY: Kroger's redirect back
+// to this URL doesn't carry our own auth cookie/header in a way we can rely
+// on cross-provider, so it resolves the account via the `state` map entry
+// `/start` created instead (which DOES know the account, from its own
+// auth) — same CSRF one-time-use design as before, now carrying `userId`
+// alongside `createdAt`.
 import type { FastifyInstance } from "fastify";
 import { buildAuthUrl, randomState, exchangeCode } from "../../kroger/auth.js";
 import { saveToken } from "../../kroger/token_store.js";
@@ -17,41 +24,40 @@ import { badRequest } from "../lib/errors.js";
 import { config } from "../../platform/config.js";
 import { logger } from "../../platform/logger.js";
 
-// CSRF `state` bookkeeping. A browser-redirect OAuth flow is stateless
-// across the round trip (the browser leaves and comes back later), so we
-// stash each generated `state` value server-side keyed by itself and check
-// it on callback: one-time use, rejected once ~10 minutes old. This
-// in-memory Map is fine for this MVP single-instance slice; a multi-instance
-// production deployment would need this in Redis/Postgres instead, but
-// that's explicitly out of scope for now.
 const STATE_TTL_MS = 10 * 60 * 1000;
-const pendingStates = new Map<string, { createdAt: number }>();
+const pendingStates = new Map<string, { createdAt: number; userId: string }>();
 
-function isStateValid(state: string): boolean {
+/** One-time-use lookup: returns the userId that started this OAuth flow, or
+ * undefined if the state is missing, already consumed, or expired. */
+function consumeState(state: string): string | undefined {
   const entry = pendingStates.get(state);
-  if (!entry) return false;
+  if (!entry) return undefined;
   pendingStates.delete(state); // one-time use, valid or not
-  return Date.now() - entry.createdAt <= STATE_TTL_MS;
+  if (Date.now() - entry.createdAt > STATE_TTL_MS) return undefined;
+  return entry.userId;
 }
 
 export default async function krogerAuthRoutes(app: FastifyInstance): Promise<void> {
-  // GET /kroger/auth/start — generates a CSRF state token, stores it
-  // server-side, and 302-redirects the browser to Kroger's consent page.
-  app.get("/kroger/auth/start", { config: { skipAuth: true } }, async (_request, reply) => {
+  // GET /kroger/auth/start — generates a CSRF state token, stashes it
+  // server-side alongside the CALLING account's id, and 302-redirects the
+  // browser to Kroger's consent page.
+  app.get("/kroger/auth/start", async (request, reply) => {
     const state = randomState();
-    pendingStates.set(state, { createdAt: Date.now() });
+    pendingStates.set(state, { createdAt: Date.now(), userId: request.userId });
     return reply.redirect(buildAuthUrl(state));
   });
 
   // GET /kroger/auth/callback — Kroger redirects the browser back here with
   // `?code=` and `?state=` on success, or `?error=` (e.g. `access_denied`,
-  // no `code` at all) if the user declined consent. Validate state
-  // (CSRF/replay guard), exchange the code for a token pair, persist it,
-  // then redirect into the SPA. Every failure path below redirects back into
-  // the SPA (`/connect-kroger?error=...`) instead of throwing a raw JSON
-  // error — this is a full-page browser redirect flow, so a thrown
-  // badRequest/500 would strand the user on a bare JSON response with no way
-  // back into the app (the bug this route plugin was fixed for).
+  // no `code` at all) if the user declined consent. Resolves state to the
+  // account that started the flow (CSRF/replay guard, same one-time-use
+  // discipline as before), exchanges the code for a token pair, persists it
+  // for THAT account, then redirects into the SPA. Every failure path below
+  // redirects back into the SPA (`/connect-kroger?error=...`) instead of
+  // throwing a raw JSON error — this is a full-page browser redirect flow,
+  // so a thrown badRequest/500 would strand the user on a bare JSON
+  // response with no way back into the app (the bug this route plugin was
+  // fixed for).
   //
   // Note on resumeRecipeId: ConnectKroger.tsx already stashes
   // `?resumeRecipeId` into sessionStorage BEFORE the user ever clicks
@@ -67,9 +73,10 @@ export default async function krogerAuthRoutes(app: FastifyInstance): Promise<vo
 
     // Consume the state token (one-time use) up front, before either the
     // error check or the success-path validation below re-reads it —
-    // isStateValid() deletes the entry on first lookup, so it must only be
+    // consumeState() deletes the entry on first lookup, so it must only be
     // called once per request no matter which branch follows.
-    const stateWasValid = typeof state === "string" && state.trim().length > 0 && isStateValid(state);
+    const stateUserId =
+      typeof state === "string" && state.trim().length > 0 ? consumeState(state) : undefined;
 
     if (typeof error === "string" && error.trim().length > 0) {
       return reply.redirect(`${config.webAppUrl}/connect-kroger?error=denied`);
@@ -81,17 +88,20 @@ export default async function krogerAuthRoutes(app: FastifyInstance): Promise<vo
     if (typeof state !== "string" || state.trim().length === 0) {
       throw badRequest("state query parameter is required");
     }
-    if (!stateWasValid) {
+    if (!stateUserId) {
       throw badRequest("state is missing, invalid, or expired");
     }
 
     try {
       const token = await exchangeCode(code);
-      await saveToken({
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token ?? "",
-        expiresAt: Date.now() + token.expires_in * 1000,
-      });
+      await saveToken(
+        {
+          accessToken: token.access_token,
+          refreshToken: token.refresh_token ?? "",
+          expiresAt: Date.now() + token.expires_in * 1000,
+        },
+        stateUserId,
+      );
     } catch (err) {
       // Bad/expired code, or the token exchange itself failing — surface as
       // a redirect back into the SPA, not an unhandled 500.

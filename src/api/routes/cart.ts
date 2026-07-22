@@ -23,7 +23,7 @@ export default async function cartRoutes(app: FastifyInstance): Promise<void> {
     const recipeId = (request.params as { id: string }).id;
     await requireOwnedJob(recipeId, request.userId);
     const approvedItems = await buildApprovedItems(recipeId);
-    const result = await runCartApproval(recipeId, approvedItems, idempotencyKey);
+    const result = await runCartApproval(recipeId, approvedItems, idempotencyKey, request.userId);
 
     // Real bug, caught live 2026-07-20: runCartApproval only ever wrote to
     // cart_runs — nothing updated the parent jobs row, so GET /recipes/:id

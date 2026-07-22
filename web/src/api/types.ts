@@ -15,6 +15,7 @@ export type {
   IngredientEditResponseDto,
   MatchEditRequest,
   PreferencesDto,
+  StoreLocationDto,
   EvidenceRef,
   ProductCandidate,
   CartItemResult,

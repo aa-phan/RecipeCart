@@ -136,8 +136,7 @@ handshake.
 | `GOOGLE_CLIENT_ID` | Yes | No | Only the API process handles the Google sign-in start/callback routes (`src/api/routes/google_auth.ts`, multi-tenancy Slice 1). |
 | `GOOGLE_CLIENT_SECRET` | Yes | No | Same reasoning as `GOOGLE_CLIENT_ID`. |
 | `GOOGLE_REDIRECT_URI` | Yes | No | Must exactly match a redirect URI registered on the Google Cloud Console OAuth client. **Must be set before this feature works at all** — see the "Multi-tenancy Slice 1" step below. |
-| `ALLOWED_EMAILS` | Yes | No | Comma-separated allowlist gating account creation on first Google login. **Must be set before going live** — unset means everyone is rejected (fails closed), not that signup is open. |
-| `OWNER_EMAIL` | Yes | No | The one allowlisted email that claims the pre-existing single-tenant account (and all its data) on its first login instead of starting fresh. |
+| `OWNER_EMAIL` | Yes | No | Signup itself is OPEN (no allowlist, 2026-07-22 — homebrew project, explicit user call: any verified Google account gets an account). This is only the one email that claims the pre-existing single-tenant account (and all its data) on its first login instead of starting fresh. |
 | `WEB_APP_URL` | Yes | No | Only the API's OAuth callback route redirects here after token exchange (`src/api/routes/kroger_auth.ts`, `config.webAppUrl`). **Resolved (this session): the `api` service serves the built web app itself** via `@fastify/static` (`src/api/server.ts`) — the Dockerfile's builder stage now runs `cd web && npm ci && npm run build` and the runtime stage copies `web/dist` in alongside `dist/`. So `WEB_APP_URL` is simply the `api` service's own production URL, not a separate domain — set it once `api`'s domain is known (step 7). |
 | `PORT` | Yes | No | Railway injects this automatically for the `api` service and expects the process to bind it (`src/api/index.ts` reads `config.apiPort`, which falls back through `API_PORT` then `3001`). The worker doesn't listen on a port, so leave this unset for `worker`. |
 | `TEST_DATABASE_URL` | **No** | **No** | Dev/CI-only. Do not set in either production service. |
@@ -303,19 +302,28 @@ P1 CLI callback server on `:3000/callback`):
 Update both in the same sitting — don't leave one stale while changing the
 other.
 
-### 8b. Set up Google sign-in (multi-tenancy Slice 1, 2026-07-21)
+### 8b. Set up Google sign-in (multi-tenancy Slice 1, 2026-07-21; open signup as of Slice 2, 2026-07-22)
 
 **This is a required step, not optional** — without it, `/login` (the
 entry point for anyone whose device token isn't already valid — see
 `web/src/auth/AuthGate.tsx`) is broken for any new sign-in, even though
 already-authenticated existing sessions/devices are unaffected. Do this
-before merging/deploying the multi-tenancy Slice 1 code, not after.
+before merging/deploying the multi-tenancy code, not after.
+
+Signup itself is open (no allowlist, explicit user call, 2026-07-22): any
+verified Google account can create a RecipeCart account. This is safe
+because Slice 2 (same commit) gave every account its own Kroger connection
+and store — a new signup can only ever affect their own Kroger cart, never
+anyone else's. Open signup does NOT mean zero risk, though: unlimited
+account creation still means unlimited recipe submissions, and each one
+costs real Claude API money with no rate limiting on the API yet (tracked
+as its own open item, Phase 7 "Known issues" in `files/phases.md`).
 
 1. In Google Cloud Console (console.cloud.google.com), create (or reuse) a
    project, then **APIs & Services > OAuth consent screen** — External
-   user type is fine for a small allowlisted group; fill in the minimum
-   required fields (app name, support email). No Google review needed at
-   this scale/scope (`openid email profile` are non-sensitive scopes).
+   user type; fill in the minimum required fields (app name, support
+   email). No Google review needed at this scale/scope (`openid email
+   profile` are non-sensitive scopes).
 2. **APIs & Services > Credentials > Create Credentials > OAuth client
    ID**, application type **Web application**. Add an **Authorized
    redirect URI**:
@@ -327,12 +335,26 @@ before merging/deploying the multi-tenancy Slice 1 code, not after.
 3. Set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`GOOGLE_REDIRECT_URI` on
    the Railway `api` service (step 5's env var pass, or after the fact via
    `railway variables --service <api-service-name> --set "KEY=value"`).
-4. Set `ALLOWED_EMAILS` (comma-separated) and `OWNER_EMAIL` (one of those
-   emails — the one that should inherit the existing single-tenant
-   account's data on its first login) on the same service. **Do not skip
-   this** — an unset `ALLOWED_EMAILS` fails closed (rejects everyone), so
-   the visible symptom of forgetting this step is "nobody, including the
-   owner, can sign in," not an open door.
+4. Set `OWNER_EMAIL` (your own email) on the same service — the one account
+   that inherits the pre-existing single-tenant data on its first login.
+   Not setting this doesn't lock anyone out (signup is open regardless);
+   it just means nobody automatically inherits the pre-existing recipes/
+   preferences.
+
+### 8c. Per-account Kroger + store setup (multi-tenancy Slice 2, 2026-07-22)
+
+No deploy-time action needed beyond what's already required above —
+`kroger/store_config.ts` and `kroger_auth.ts` are DB-backed and per-user
+now (`store_locations` table, migration `006_store_locations`), so a fresh
+account configures its own store via the web app (Preferences screen —
+enter a zip code) and its own Kroger connection via the existing
+"Connect Kroger" flow, same UI every account already sees. The
+pre-existing single-tenant deployment's store still bootstraps once from
+`STORE_LOCATION_ID`/`STORE_NAME`/`STORE_ZIP_CODE` env vars if set (only
+for whichever account claims `DEFAULT_USER_ID` via `OWNER_EMAIL` above) —
+no migration/backfill needed for that account's existing Kroger connection
+either, since `kroger_auth` was already keyed by `user_id` before this
+slice.
 
 ### 9. Set up an external uptime monitor on `/health` (A4-5, Spec 4 §7 item 9)
 

@@ -202,7 +202,7 @@ export default async function recipesRoutes(app: FastifyInstance): Promise<void>
       const { ingredientId } = request.params;
       await requireOwnedIngredient(ingredientId, request.userId);
       const edit = request.body ?? {};
-      const result = await editIngredient(ingredientId, edit);
+      const result = await editIngredient(ingredientId, edit, request.userId);
       if (result === null) {
         reply.status(204);
         return null;

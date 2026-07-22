@@ -1,8 +1,8 @@
-// Google sign-in route plugin (multi-tenancy Slice 1, 2026-07-21 — see
-// files/phases.md's Phase 7 "Architecture: multi-tenancy" entry and
-// src/auth/google.ts's header comment). Registered with prefix `/api` in
-// server.ts, so paths below are `GET /api/auth/google/start` and
-// `GET /api/auth/google/callback`.
+// Google sign-in route plugin (multi-tenancy Slice 1, 2026-07-21; open
+// signup as of Slice 2, 2026-07-22 — see files/phases.md's Phase 7
+// "Architecture: multi-tenancy" entry and src/auth/google.ts's header
+// comment). Registered with prefix `/api` in server.ts, so paths below are
+// `GET /api/auth/google/start` and `GET /api/auth/google/callback`.
 //
 // Structure deliberately mirrors routes/kroger_auth.ts: both routes are
 // `skipAuth: true` BY NECESSITY (this IS the pre-auth entry point — nothing
@@ -31,11 +31,19 @@ function isStateValid(state: string): boolean {
 }
 
 /** Resolves a verified Google identity to a `users.id`, applying the
- * allowlist + owner-claim rules (see this file's module doc / the Slice 1
- * plan). Returns null when the email isn't allowed — the caller redirects
- * to a "not invited" error rather than throwing, matching every other
- * failure path in this route. */
-async function resolveUserId(userinfo: { sub: string; email: string }): Promise<string | null> {
+ * owner-claim rule (see this file's module doc). Signup is OPEN as of
+ * 2026-07-22 (explicit user call: "homebrew project, don't want an
+ * allowlist") — any verified Google account gets an account, no invite
+ * needed. Safe specifically BECAUSE multi-tenancy Slice 2 (per-account
+ * Kroger connections, shipped in the same commit) landed alongside it: a
+ * stranger signing up can now only ever affect their OWN Kroger cart, never
+ * the owner's — see kroger_auth.ts/cart_runner.ts. Open signup does NOT
+ * remove every risk, though — unlimited account creation still means
+ * unlimited recipe submissions, and each one costs real Claude API money
+ * with no rate limiting anywhere on the API yet (a real, separate,
+ * still-open gap — see files/phases.md's Phase 7 "Known issues"). Never
+ * returns null: every verified sign-in gets an account. */
+async function resolveUserId(userinfo: { sub: string; email: string }): Promise<string> {
   const email = userinfo.email.trim().toLowerCase();
   const db = getDb();
 
@@ -48,15 +56,12 @@ async function resolveUserId(userinfo: { sub: string; email: string }): Promise<
     .executeTakeFirst();
   if (existing) return existing.id;
 
-  // Not yet linked — only allowlisted emails may provision (claim or
-  // create) an account at all.
-  if (!config.allowedEmails.includes(email)) return null;
-
   // 2. Owner-claim: the one email allowed to inherit the pre-existing
   // DEFAULT_USER_ID account (and everything already attached to it —
-  // recipes, jobs, preferences, the shared Kroger connection) instead of
-  // starting with an empty new account. Only fires once — guarded by
-  // DEFAULT_USER_ID.google_sub still being null.
+  // recipes, jobs, preferences) instead of starting with an empty new
+  // account. Only fires once — guarded by DEFAULT_USER_ID.google_sub still
+  // being null. Orthogonal to signup being open: this decides which ONE
+  // sign-in inherits the legacy data, not who's allowed to sign up at all.
   if (email === config.ownerEmail && config.ownerEmail.length > 0) {
     const defaultUser = await db
       .selectFrom("users")
@@ -120,9 +125,6 @@ export default async function googleAuthRoutes(app: FastifyInstance): Promise<vo
     }
 
     const userId = await resolveUserId(userinfo);
-    if (!userId) {
-      return reply.redirect(`${config.webAppUrl}/login?error=not_invited`);
-    }
 
     const { token } = await mintDeviceToken(userId, "Browser (Google sign-in)");
     setDeviceTokenCookie(reply, token);

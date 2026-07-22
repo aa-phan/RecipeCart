@@ -120,7 +120,7 @@ program
       }
 
       const store = results.data[0]!;
-      saveStoreLocation({
+      await saveStoreLocation({
         locationId: store.locationId,
         name: store.name,
         zipCode: store.address.zipCode,
@@ -236,7 +236,7 @@ program
       // recipe's prices/availability if its matches are older than the config
       // window — a no-op in the common case. Skipped if no store is configured
       // (the existing, possibly-stale matches still work).
-      const store = loadStoreLocation();
+      const store = await loadStoreLocation();
       if (store) {
         await refreshIfStale(recipeId, store.locationId);
       }
@@ -291,7 +291,7 @@ program
       return;
     }
 
-    const store = loadStoreLocation();
+    const store = await loadStoreLocation();
     if (!store) {
       console.error("No Kroger store configured — run `recipecart set-store <zip-code>` first.");
       process.exitCode = 1;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { apiGet, apiPatch } from "../../api/client";
-import type { PreferencesDto } from "../../api/types";
+import { apiGet, apiPatch, apiPost, ApiError } from "../../api/client";
+import type { PreferencesDto, StoreLocationDto } from "../../api/types";
 import { getStoredTheme, setTheme, type ThemePreference } from "../../theme";
 import "./Preferences.css";
 
@@ -32,6 +32,17 @@ export default function Preferences() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  // Store location (multi-tenancy Slice 2, 2026-07-22): each account has its
+  // own Kroger store now (kroger/store_config.ts is per-user), so this is
+  // the one place a non-owner account — no CLI/shell access at all — can
+  // set theirs. GET 404s when nothing's configured yet; that's expected on
+  // a brand-new account, not an error to surface.
+  const [store, setStore] = useState<StoreLocationDto | null>(null);
+  const [storeLoading, setStoreLoading] = useState(true);
+  const [storeZipCode, setStoreZipCode] = useState("");
+  const [storeSaving, setStoreSaving] = useState(false);
+  const [storeError, setStoreError] = useState<string | null>(null);
 
   // Purely client-side display preference — stored in localStorage, not
   // part of PreferencesDto/the API round trip (spec-5-visual-design.md §2.4).
@@ -70,6 +81,44 @@ export default function Preferences() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = await apiGet<StoreLocationDto>("/api/store-location");
+        if (!cancelled) setStore(data);
+      } catch (err) {
+        // 404 just means no store configured yet — not an error state.
+        if (!cancelled && !(err instanceof ApiError && err.status === 404)) {
+          setStoreError(err instanceof Error ? err.message : "Failed to load store location");
+        }
+      } finally {
+        if (!cancelled) setStoreLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSaveStore = async () => {
+    const zipCode = storeZipCode.trim();
+    if (!zipCode) return;
+    setStoreSaving(true);
+    setStoreError(null);
+    try {
+      const saved = await apiPost<StoreLocationDto>("/api/store-location", { zipCode });
+      setStore(saved);
+      setStoreZipCode("");
+    } catch (err) {
+      setStoreError(err instanceof ApiError ? err.message : "Failed to find/save a store.");
+    } finally {
+      setStoreSaving(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -113,6 +162,55 @@ export default function Preferences() {
           {error}
         </p>
       )}
+
+      <section className="preferences__section" aria-labelledby="store-heading">
+        <h2 id="store-heading" className="preferences__section-heading">
+          Store
+        </h2>
+        <p className="preferences__section-hint">
+          Recipes are matched against this store's Kroger inventory.
+        </p>
+
+        {storeError && (
+          <p className="preferences__error" role="alert">
+            {storeError}
+          </p>
+        )}
+
+        {storeLoading ? (
+          <p className="preferences__section-hint">Loading store…</p>
+        ) : store ? (
+          <p className="preferences__store-current">
+            Current store: <strong>{store.name}</strong> ({store.zipCode})
+          </p>
+        ) : (
+          <p className="preferences__section-hint">No store configured yet.</p>
+        )}
+
+        <div className="preferences__field preferences__store-field">
+          <label htmlFor="store-zip">
+            {store ? "Change store — enter a zip code" : "Enter a zip code to find your store"}
+          </label>
+          <div className="preferences__store-row">
+            <input
+              id="store-zip"
+              type="text"
+              inputMode="numeric"
+              value={storeZipCode}
+              onChange={(e) => setStoreZipCode(e.target.value)}
+              placeholder="e.g. 75201"
+            />
+            <button
+              type="button"
+              onClick={handleSaveStore}
+              disabled={storeSaving || storeZipCode.trim().length === 0}
+              className="preferences__store-save"
+            >
+              {storeSaving ? "Finding…" : "Find & save"}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section
         className="preferences__section"

@@ -1,9 +1,11 @@
-// Google sign-in route tests (multi-tenancy Slice 1, 2026-07-21). Mirrors
-// kroger_auth.test.ts's structure (mock the OAuth client module, drive the
-// real start/callback routes via app.inject). The three identity-resolution
-// branches — already-linked, owner-claim, brand-new account — plus the
-// allowlist rejection are the actual point of this file; the OAuth
-// mechanics themselves are just the existing kroger_auth.ts pattern reused.
+// Google sign-in route tests (multi-tenancy Slice 1, 2026-07-21; open
+// signup as of Slice 2, 2026-07-22 — the allowlist was removed by explicit
+// user call). Mirrors kroger_auth.test.ts's structure (mock the OAuth
+// client module, drive the real start/callback routes via app.inject). The
+// identity-resolution branches — already-linked, owner-claim, brand-new
+// account for ANY verified email — are the actual point of this file; the
+// OAuth mechanics themselves are just the existing kroger_auth.ts pattern
+// reused.
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { getDb, DEFAULT_USER_ID } from "../../platform/database.js";
@@ -20,7 +22,6 @@ vi.mock("../../auth/google.js", () => ({
 
 const { buildServer } = await import("../server.js");
 
-const ORIGINAL_ALLOWED_EMAILS = config.allowedEmails;
 const ORIGINAL_OWNER_EMAIL = config.ownerEmail;
 
 describe("google auth routes", () => {
@@ -35,13 +36,11 @@ describe("google auth routes", () => {
       email_verified: true,
       name: "Owner",
     });
-    config.allowedEmails = ["owner@example.com", "second@example.com"];
     config.ownerEmail = "owner@example.com";
     app = await buildServer();
   });
 
   afterEach(() => {
-    config.allowedEmails = ORIGINAL_ALLOWED_EMAILS;
     config.ownerEmail = ORIGINAL_OWNER_EMAIL;
   });
 
@@ -109,7 +108,7 @@ describe("google auth routes", () => {
     expect(tokens).toHaveLength(2); // one per login, same account
   });
 
-  it("creates a brand-new account for an allowlisted, non-owner email", async () => {
+  it("creates a brand-new account for a non-owner email", async () => {
     userinfoMock.mockResolvedValue({
       sub: "google-sub-2",
       email: "second@example.com",
@@ -132,7 +131,7 @@ describe("google auth routes", () => {
     expect(newUser?.email).toBe("second@example.com");
   });
 
-  it("rejects sign-in from an email not on the allowlist — no account created", async () => {
+  it("creates a brand-new account for a total stranger — signup is open, no allowlist", async () => {
     userinfoMock.mockResolvedValue({
       sub: "google-sub-stranger",
       email: "stranger@example.com",
@@ -145,16 +144,23 @@ describe("google auth routes", () => {
       method: "GET",
       url: "/api/auth/google/callback?code=auth-code&state=fake-state",
     });
-    expect(res.headers.location).toBe("http://localhost:5173/login?error=not_invited");
+    expect(res.headers.location).toBe("http://localhost:5173/?loggedIn=true");
 
     const users = await getDb().selectFrom("users").selectAll().execute();
-    expect(users).toHaveLength(1); // only the seeded DEFAULT_USER_ID
+    expect(users).toHaveLength(2); // seeded DEFAULT_USER_ID + the stranger's new account
 
-    const tokens = await getDb().selectFrom("device_tokens").select("id").execute();
-    expect(tokens).toHaveLength(0); // nothing minted
+    const newUser = users.find((u) => u.id !== DEFAULT_USER_ID);
+    expect(newUser?.google_sub).toBe("google-sub-stranger");
+
+    const tokens = await getDb()
+      .selectFrom("device_tokens")
+      .select("id")
+      .where("user_id", "=", newUser!.id)
+      .execute();
+    expect(tokens).toHaveLength(1); // a real session was minted for them
   });
 
-  it("rejects an unverified email even if it's on the allowlist", async () => {
+  it("rejects an unverified email even for the owner", async () => {
     userinfoMock.mockResolvedValue({
       sub: "google-sub-unverified",
       email: "owner@example.com",

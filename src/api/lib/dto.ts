@@ -126,3 +126,11 @@ export interface PreferencesDto {
   dietaryTags: string[];
   pantryAlwaysOwned: string[];
 }
+
+// ── Store location (multi-tenancy Slice 2) ─────────────────────────────────
+
+export interface StoreLocationDto {
+  locationId: string;
+  name: string;
+  zipCode: string;
+}

@@ -12,6 +12,7 @@ import * as m002 from "./migrations/002_auth_and_preferences.js";
 import * as m003 from "./migrations/003_ingredient_confidence.js";
 import * as m004 from "./migrations/004_device_tokens.js";
 import * as m005 from "./migrations/005_multi_tenant_users.js";
+import * as m006 from "./migrations/006_store_locations.js";
 
 const migrations: Record<string, Migration> = {
   "001_initial": m001,
@@ -19,6 +20,7 @@ const migrations: Record<string, Migration> = {
   "003_ingredient_confidence": m003,
   "004_device_tokens": m004,
   "005_multi_tenant_users": m005,
+  "006_store_locations": m006,
 };
 
 class StaticProvider implements MigrationProvider {

@@ -19,7 +19,7 @@
 // time. `ApprovedCartItem.fallbacks` (below) only helps the DETECTABLE
 // failure case — Kroger actually rejecting an add — not this silent one;
 // there is currently no mechanical fix for the silent case at this API tier.
-import { getDb } from "../platform/database.js";
+import { getDb, DEFAULT_USER_ID } from "../platform/database.js";
 import { logger } from "../platform/logger.js";
 import { addToCart } from "./client.js";
 import { loadToken, saveToken, isExpiredOrMissing, type StoredKrogerToken } from "./token_store.js";
@@ -117,14 +117,15 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Ensures a valid Kroger user access token, refreshing it if expired/near
- * expiry (Spec 3 §2.3 pre-flight, §2.4 token management). Throws a clear,
- * user-facing error if there's no stored token at all — callers should treat
- * that as a `requires_user_intervention` terminal state, not a crash. Does
- * NOT attempt to trigger the interactive OAuth flow itself; that's a
- * CLI-level concern. */
-export async function ensureValidUserToken(): Promise<string> {
-  const stored = await loadToken();
+/** Ensures a valid Kroger user access token for `userId` (multi-tenancy
+ * Slice 2 — defaults to DEFAULT_USER_ID for CLI/single-tenant callers),
+ * refreshing it if expired/near expiry (Spec 3 §2.3 pre-flight, §2.4 token
+ * management). Throws a clear, user-facing error if there's no stored
+ * token at all — callers should treat that as a `requires_user_intervention`
+ * terminal state, not a crash. Does NOT attempt to trigger the interactive
+ * OAuth flow itself; that's a CLI/web-UI-level concern. */
+export async function ensureValidUserToken(userId: string = DEFAULT_USER_ID): Promise<string> {
+  const stored = await loadToken(userId);
   if (!stored) {
     throw new Error("Not connected to Kroger — run `recipecart auth` first");
   }
@@ -141,7 +142,7 @@ export async function ensureValidUserToken(): Promise<string> {
     refreshToken: refreshed.refresh_token ?? stored.refreshToken,
     expiresAt: Date.now() + refreshed.expires_in * 1000,
   };
-  await saveToken(newToken);
+  await saveToken(newToken, userId);
   return newToken.accessToken;
 }
 
@@ -457,6 +458,7 @@ async function resumeCartRun(
   jobId: string,
   approvedItems: ApprovedCartItem[],
   storedResults: CartItemResult[],
+  userId: string,
 ): Promise<CartRunResult> {
   const alreadyAdded = storedResults.filter((r) => r.status === "added");
   const remaining = approvedItems.filter((item) => !isAlreadyAdded(item, alreadyAdded));
@@ -479,7 +481,7 @@ async function resumeCartRun(
 
   let accessToken: string;
   try {
-    accessToken = await ensureValidUserToken();
+    accessToken = await ensureValidUserToken(userId);
   } catch (err) {
     // Still not connected — the row stays requires_user_intervention with
     // exactly what it had before (nothing new attempted).
@@ -535,6 +537,7 @@ export async function runCartApproval(
   recipeId: string,
   approvedItems: ApprovedCartItem[],
   idempotencyKey: string,
+  userId: string = DEFAULT_USER_ID,
 ): Promise<CartRunResult> {
   // 1. Idempotency check first — the primary duplicate guard (Spec 3 §17:
   // no cart-read exists to double-check against). A run already in a
@@ -553,7 +556,7 @@ export async function runCartApproval(
       });
       return existing;
     }
-    return resumeCartRun(recipeId, existing.jobId, approvedItems, existing.results);
+    return resumeCartRun(recipeId, existing.jobId, approvedItems, existing.results, userId);
   }
 
   const jobId = crypto.randomUUID();
@@ -569,7 +572,7 @@ export async function runCartApproval(
   // requires_user_intervention result, not a crash.
   let accessToken: string;
   try {
-    accessToken = await ensureValidUserToken();
+    accessToken = await ensureValidUserToken(userId);
   } catch (err) {
     const status: CartRunStatus = "requires_user_intervention";
     const results: CartItemResult[] = [];

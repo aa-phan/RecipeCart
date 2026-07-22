@@ -12,6 +12,25 @@ function requireEnv(name: string): string {
   return value;
 }
 
+// DESIGN CHOICE (2026-07-22, explicit — not an oversight to "fix" later
+// without a real reason): every external API this app calls —
+// ANTHROPIC_API_KEY, KROGER_CLIENT_ID/SECRET, GOOGLE_CLIENT_ID/SECRET — is
+// billed to the developer's PERSONAL account/tier, not a business/
+// enterprise plan. That's a deliberate fit for a homebrew, individually-
+// operated project with open-but-small signup (see google_auth.ts's
+// resolveUserId): personal free/low tiers (Kroger's Public API, Google's
+// OAuth consent screen at low usage) and a personal Anthropic API key are
+// the right-sized choice at this scale, not a corner cut. If this were ever
+// to scale beyond a handful of real households — meaningfully more
+// signups, real production SLAs, someone else's money on the line — each
+// of these would need a real look: Anthropic usage/spend limits or a
+// business agreement (see the recipecart-sonnet5-pricing-cliff memory /
+// files/phases.md's Cost & pricing watch section for the pricing-cliff
+// angle specifically), Kroger's Partner tier (removes the Public tier's
+// rate limits, already tracked in Phase 7's post-MVP roadmap), and Google's
+// OAuth consent screen moving out of "testing"/small-scale into a verified
+// production app. None of that is needed at today's scale — noted here so
+// a future scale-up doesn't have to rediscover this tradeoff from scratch.
 export const config = {
   dataDir: process.env.DATA_DIR ?? "./data",
 
@@ -69,22 +88,12 @@ export const config = {
   googleRedirectUri:
     process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3001/api/auth/google/callback",
 
-  // Email allowlist gating account auto-creation on first Google sign-in
-  // (multi-tenancy Slice 1) — without this, anyone with a Google account
-  // could create a RecipeCart account and reach the still-shared Kroger
-  // cart (per-user Kroger connections are Slice 2, not yet built). Comma-
-  // separated, trimmed, case-insensitive compare at the call site. Empty by
-  // default so a misconfigured deploy fails closed (rejects everyone)
-  // rather than silently allowing open signup.
-  allowedEmails: (process.env.ALLOWED_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter((e) => e.length > 0),
-
   // The one email allowed to claim the pre-existing DEFAULT_USER_ID account
-  // (and all its existing recipes/jobs/preferences/Kroger connection) on
-  // its first Google login, instead of getting a brand-new empty account
-  // like every other allowed email. Must also be present in ALLOWED_EMAILS.
+  // (and all its existing recipes/jobs/preferences) on its first Google
+  // login, instead of getting a brand-new empty account like everyone else.
+  // Signup itself is open (2026-07-22, explicit user call — "homebrew
+  // project, don't want an allowlist") — this only decides which ONE
+  // sign-in inherits the pre-existing data, not who's allowed to sign up.
   ownerEmail: (process.env.OWNER_EMAIL ?? "").trim().toLowerCase(),
 
   // Where to send the browser after the Kroger OAuth callback finishes

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { getDb } from "../platform/database.js";
+import { getDb, DEFAULT_USER_ID } from "../platform/database.js";
 import { resetDb } from "../platform/test-db.js";
 
 // Mock addToCart (src/kroger/client.ts) — CRITICAL: this must NEVER be the
@@ -72,6 +72,22 @@ describe("ensureValidUserToken", () => {
     expect(refreshAccessTokenMock).not.toHaveBeenCalled();
   });
 
+  // multi-tenancy Slice 2 (2026-07-22): the whole point of threading userId
+  // through this function is that it loads THAT account's Kroger token, not
+  // always DEFAULT_USER_ID's — real regression coverage for the exact risk
+  // that made open signup unsafe before this shipped.
+  it("loads the given user's token, not always DEFAULT_USER_ID's", async () => {
+    loadTokenMock.mockReturnValue(validToken);
+    await ensureValidUserToken("some-other-user");
+    expect(loadTokenMock).toHaveBeenCalledWith("some-other-user");
+  });
+
+  it("defaults to DEFAULT_USER_ID when no userId is given", async () => {
+    loadTokenMock.mockReturnValue(validToken);
+    await ensureValidUserToken();
+    expect(loadTokenMock).toHaveBeenCalledWith(DEFAULT_USER_ID);
+  });
+
   it("refreshes and saves a new token when expired", async () => {
     loadTokenMock.mockReturnValue({
       accessToken: "old-tok",
@@ -89,6 +105,7 @@ describe("ensureValidUserToken", () => {
     expect(refreshAccessTokenMock).toHaveBeenCalledWith("old-refresh");
     expect(saveTokenMock).toHaveBeenCalledWith(
       expect.objectContaining({ accessToken: "new-tok", refreshToken: "new-refresh" }),
+      DEFAULT_USER_ID,
     );
   });
 
@@ -106,6 +123,7 @@ describe("ensureValidUserToken", () => {
     await ensureValidUserToken();
     expect(saveTokenMock).toHaveBeenCalledWith(
       expect.objectContaining({ accessToken: "new-tok", refreshToken: "old-refresh" }),
+      DEFAULT_USER_ID,
     );
   });
 
@@ -141,6 +159,23 @@ describe("runCartApproval", () => {
     const rows = await cartRunsForRecipe1();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe("completed");
+  });
+
+  // multi-tenancy Slice 2 (2026-07-22): confirms cart approval loads the
+  // CALLING account's Kroger token, not always DEFAULT_USER_ID's — this is
+  // the real fix for "a stranger's cart-approval used to silently spend
+  // the owner's Kroger money" (see google_auth.ts's resolveUserId doc).
+  it("uses the given user's Kroger token, not DEFAULT_USER_ID's", async () => {
+    addToCartMock.mockResolvedValue({ ok: true });
+
+    await runCartApproval(
+      "recipe-1",
+      [{ upc: "111", quantity: 1, ingredientId: "ing-1" }],
+      "idem-key-per-user",
+      "some-other-user",
+    );
+
+    expect(loadTokenMock).toHaveBeenCalledWith("some-other-user");
   });
 
   it("partial failure: mixed added / needs_attention -> partially_completed, continues past bad item", async () => {

@@ -34,10 +34,12 @@ export async function runJob(job: Job, workerId: string): Promise<void> {
   const jobId = job.id;
   logger.info("worker: starting job", { jobId, sourceUrl: job.source_url });
 
-  const store = loadStoreLocation();
+  const store = await loadStoreLocation(job.user_id);
   if (!store) {
     await finishJob(jobId, JobStatus.Failed, {
-      error: "No Kroger store configured — run `recipecart set-store <zip-code>` first.",
+      error:
+        "No Kroger store configured — set one via the web app (Preferences) or run " +
+        "`recipecart set-store <zip-code>` first.",
     });
     return;
   }
@@ -116,10 +118,10 @@ export async function runJob(job: Job, workerId: string): Promise<void> {
     }
 
     await setStage(jobId, JobStatus.MatchingProducts, { recipeId });
-    // Same single-slot fetch pattern as loadStoreLocation above, just backed
-    // by the `preferences` table instead of a local file — wires the
-    // Preferences screen's saved settings into ranking (Phase 5).
-    const preferences = await loadPreferences();
+    // Wires the Preferences screen's saved settings into ranking (Phase 5)
+    // — for the JOB'S OWNER specifically, as of multi-tenancy Slice 2 (the
+    // worker processes every account's jobs, not just one).
+    const preferences = await loadPreferences(job.user_id);
     await matchRecipeAndPersist(recipeId, store.locationId, { preferences });
 
     await finishJob(jobId, JobStatus.AwaitingReview, { recipeId });

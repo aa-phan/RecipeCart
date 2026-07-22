@@ -12,6 +12,7 @@ import { loadStoreLocation } from "../../kroger/store_config.js";
 import { loadPreferences } from "../routes/preferences.js";
 import { toMatchDto } from "./match_edits.js";
 import { logger } from "../../platform/logger.js";
+import { DEFAULT_USER_ID } from "../../platform/database.js";
 
 function toIngredientDto(row: {
   id: string;
@@ -68,6 +69,7 @@ export type IngredientEditResult = IngredientDto & { match?: MatchDto };
 export async function editIngredient(
   ingredientId: string,
   edit: IngredientEditRequest,
+  userId: string = DEFAULT_USER_ID,
 ): Promise<IngredientEditResult | null> {
   const db = getDb();
 
@@ -118,7 +120,7 @@ export async function editIngredient(
     (before.quantity_value !== row.quantity_value || before.quantity_unit !== row.quantity_unit);
   if (!quantityActuallyChanged) return dto;
 
-  const store = loadStoreLocation();
+  const store = await loadStoreLocation(userId);
   if (!store) return dto; // no store configured — nothing to match against yet
 
   const hasExistingMatch = await db
@@ -129,9 +131,9 @@ export async function editIngredient(
   if (!hasExistingMatch) return dto; // never matched (e.g. manual add) — nothing to re-drive
 
   try {
-    // Same single-slot fetch pattern as loadStoreLocation above — wires the
-    // Preferences screen's saved settings into this re-match too (Phase 5).
-    const preferences = await loadPreferences();
+    // Wires the Preferences screen's saved settings into this re-match too
+    // (Phase 5) — for THIS account, as of multi-tenancy Slice 2.
+    const preferences = await loadPreferences(userId);
     await rematchIngredient(ingredientId, store.locationId, { preferences });
   } catch (err) {
     logger.error("editIngredient: re-match after amount edit failed", {
