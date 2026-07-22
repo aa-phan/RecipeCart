@@ -19,13 +19,17 @@ import { unauthorized } from "./errors.js";
 declare module "fastify" {
   interface FastifyRequest {
     userId: string;
+    /** device_tokens.id for the token this request authenticated with —
+     * lets a route act on "THIS session specifically" (e.g. sign-out,
+     * routes/signout.ts) without re-extracting/re-hashing the token. */
+    deviceId: string;
   }
   interface FastifyContextConfig {
     skipAuth?: boolean;
   }
 }
 
-const COOKIE_NAME = "recipecart_device_token";
+export const COOKIE_NAME = "recipecart_device_token";
 
 function extractToken(request: FastifyRequest): string | undefined {
   const authHeader = request.headers.authorization;
@@ -68,6 +72,7 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     if (!deviceToken) throw unauthorized();
 
     request.userId = deviceToken.user_id;
+    request.deviceId = deviceToken.id;
 
     // Best-effort last_used_at bump — a single indexed UPDATE by primary
     // key, fired without blocking the request on it. A failure here (e.g. a

@@ -270,6 +270,13 @@ Resolved as part of these slices:
   unaffected by this slice and remains true by design — that was never the actual problem;
   the problem was that every token pointed at the same one account regardless of who was
   signing in. Real per-user identity now exists underneath the same per-device-token model.
+- **Found live, fixed same-day: no way to sign out anywhere in the app.** Google sign-in
+  (Slice 1) added a real front door but no exit — `POST /api/auth/signout` now revokes the
+  calling session's own `device_tokens` row and clears its cookie (`request.deviceId`, set
+  by `lib/auth.ts`, identifies which one), and `AppShell` got a "Sign out" button. Also
+  prompted re-scoping the Devices screen (`Setup.tsx`, `routes/setup.ts`) to the iOS Shortcut
+  specifically — manually generating a device token is redundant for browsers now that they
+  can just sign in with Google directly, which mints its own session token automatically.
 
 **Signup is open, no allowlist (2026-07-22, explicit user call: "homebrew project, don't want
 an allowlist").** Any verified Google account can create a RecipeCart account — safe

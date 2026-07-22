@@ -53,6 +53,9 @@ import devicesRoutes from "./routes/devices.js";
 // Multi-tenancy Slice 2 (2026-07-22): per-account store location.
 import storeLocationRoutes from "./routes/store_location.js";
 
+// Sign-out (2026-07-22).
+import signoutRoutes from "./routes/signout.js";
+
 // TODO(B5): uncomment once routes/health.ts exists. Remember: that route
 // must set `config: { skipAuth: true }` (see lib/auth.ts) since GET /health
 // is exempt from device-token auth.
@@ -179,6 +182,9 @@ export async function buildServer(opts: { loggerStream?: Writable } = {}): Promi
 
   // Multi-tenancy Slice 2 (2026-07-22)
   await app.register(storeLocationRoutes, { prefix: "/api" });
+
+  // Sign-out (2026-07-22)
+  await app.register(signoutRoutes, { prefix: "/api" });
 
   // TODO(B5): uncomment once routes/health.ts exists. Remember: this route
   // must set `config: { skipAuth: true }` (see lib/auth.ts) since GET /health

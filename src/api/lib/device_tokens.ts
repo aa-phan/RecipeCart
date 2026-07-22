@@ -7,13 +7,13 @@ import crypto from "node:crypto";
 import type { FastifyReply } from "fastify";
 import { getDb } from "../../platform/database.js";
 import type { DeviceDto } from "./dto.js";
+import { COOKIE_NAME } from "./auth.js";
 
 // setup.ts (the only caller that ever omits a name — google_auth.ts always
 // passes an explicit "Browser (Google sign-in)") is scoped to the Shortcut
 // as of 2026-07-22, so that's the sensible default rather than a generic
 // "Unnamed device".
 const DEFAULT_DEVICE_NAME = "iOS Shortcut";
-const COOKIE_NAME = "recipecart_device_token";
 
 /** Mints a device_tokens row for `userId`, returning the raw token (shown
  * once, e.g. for pasting into the iOS Shortcut) and its DTO. Does NOT set
