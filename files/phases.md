@@ -218,14 +218,14 @@ picked up.
   Kroger auth as part of onboarding. Needs Setup to check connection status and route into
   the Kroger OAuth flow before (or right after) minting a device token — not just wait for a
   failure to surface it.
-- **`POST /api/setup/device-token` is unauthenticated and unthrottled.** Confirmed in-code:
-  `src/api/routes/setup.ts` marks it `skipAuth: true` with a comment already acknowledging
-  this is "acceptable only because this project is currently a single-household MVP beta"
-  and that it needs a real gate "before onboarding any untrusted user." As-is, anyone who
-  finds the URL can mint unlimited device tokens — no rate limiting or abuse protection
-  exists anywhere on the API (no `@fastify/rate-limit` or equivalent). A sharper, more
-  concrete instance of the multi-tenancy/auth gap below, worth tracking on its own since it's
-  exploitable today, not just a future-architecture concern.
+- ~~`POST /api/setup/device-token` is unauthenticated and unthrottled.~~ **Fixed 2026-07-21**
+  (commit `64afe21`, live in production — verified against the real deployed URL: no/wrong
+  `setupSecret` → 401, correct value → 200, existing tokens/sessions unaffected). The route
+  now requires a `setupSecret` matching the `SETUP_SECRET` env var (timing-safe compared,
+  fails closed if unset) before minting anything. Still a shared-household-passphrase model,
+  not real multi-tenant auth — that's the separate item below. Per-IP rate limiting was
+  deliberately left out of scope (a long random secret makes network guessing impractical
+  without it; general API rate limiting stays its own untouched backlog item).
 
 ### Architecture: multi-tenancy
 
