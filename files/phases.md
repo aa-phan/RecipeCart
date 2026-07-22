@@ -167,6 +167,150 @@ has a real, computed, passing WCAG AA contrast ratio on record.
 
 ---
 
+## Phase 7 — Open Items / Backlog
+
+**Status: not a build phase — a living, curated list.** Everything below was found and
+documented across Phases 1–6 (real production incidents, live-tested findings, explicit
+user defer-calls) but never given a home of its own; this section is that home. Pulled
+together from the auto-memory log and the specs' own deferred/open markers so there's one
+place to work from instead of five. Items get added here as they're found and removed once
+actually resolved (move the resolution note to the relevant phase above, don't just delete
+the line silently). Not prioritized/ordered — add priority/sequencing here as items get
+picked up.
+
+### Known issues (needs a fix or a concrete repro)
+
+- **Local Whisper ASR OOM on caption-insufficient videos.** Real, measured: `transcribe()`
+  alone peaks ~1.3–2GB against real audio, reliably exceeding the Railway worker's 1024MB
+  limit — not one bad video, every caption-insufficient job hit this. As of 2026-07-21, ASR
+  is hard-disabled in production (`ASR_ENABLED=false` on the worker service;
+  `config.extraction.asrEnabled` in code) after a live incident where retries kept
+  re-triggering worker crashes even with a per-job retry cap in place. Caption-insufficient
+  jobs still get OCR, just no transcript. Options to actually re-enable, not yet pursued:
+  bump the worker's memory tier; deeper ONNX Runtime session tuning (arena limits, smaller
+  `chunk_length_s`, explicit inter-chunk cleanup); or accept local Whisper isn't viable in
+  this resource envelope and drop it for good. See `recipecart-worker-asr-oom` memory for
+  the full measurement writeup.
+- **Ingredient merge/dedup.** The same ingredient (e.g. garlic powder) appearing in multiple
+  recipe components (a meat rub AND a sauce) shows as separate review rows instead of one
+  summed line — confirmed via a real production recipe, not a hypothetical. No merge/dedup
+  rule exists anywhere in the pipeline today. A real fix needs matching on canonical name
+  AND compatible unit (or a conversion table), summing only when units genuinely
+  match/convert, falling back to separate rows otherwise. See
+  `recipecart-ingredient-merge-backlog` memory.
+- **Amount-edit re-match works "partially."** Editing an ingredient's quantity/unit on the
+  Review screen is supposed to re-run product matching (`editIngredient` →
+  `rematchIngredient`). A real root cause (missing `DATA_DIR` on the API service) was found
+  and fixed (commit `e86863a`), but post-fix user testing found it still "works partially" —
+  no confirmed repro yet (which ingredient, which amount change, what the UI showed vs.
+  expected). Needs a concrete repro + a check of whether `rematchIngredient`/Kroger search
+  calls actually fire on the edit before attempting another fix. See
+  `recipecart-amount-rematch-partial` memory.
+- **Worker volume usage** was at 442MB/500MB after the 2026-07-20 ASR-OOM crash-loop fix —
+  not yet re-verified whether that's stable/expected or a slow leak (temp-media sweep should
+  be cleaning `data/tmp/`, worth confirming it actually is).
+- **First-time Setup doesn't route to Kroger connection.** Confirmed 2026-07-21 via a real
+  second-user test: the Setup screen (device-token onboarding, `web/src/screens/Setup/
+  Setup.tsx`) never mentions or links to Kroger at all — `ConnectKroger` is currently only
+  reachable as a `FailureCard` recovery link (`kroger_not_connected`/`kroger_token_expired`),
+  i.e. only AFTER a new user submits a recipe and hits a failure. A new user finishes Setup
+  believing they're done, then hits a confusing failure later instead of being walked through
+  Kroger auth as part of onboarding. Needs Setup to check connection status and route into
+  the Kroger OAuth flow before (or right after) minting a device token — not just wait for a
+  failure to surface it.
+- **`POST /api/setup/device-token` is unauthenticated and unthrottled.** Confirmed in-code:
+  `src/api/routes/setup.ts` marks it `skipAuth: true` with a comment already acknowledging
+  this is "acceptable only because this project is currently a single-household MVP beta"
+  and that it needs a real gate "before onboarding any untrusted user." As-is, anyone who
+  finds the URL can mint unlimited device tokens — no rate limiting or abuse protection
+  exists anywhere on the API (no `@fastify/rate-limit` or equivalent). A sharper, more
+  concrete instance of the multi-tenancy/auth gap below, worth tracking on its own since it's
+  exploitable today, not just a future-architecture concern.
+
+### Architecture: multi-tenancy
+
+- **Multi-tenant architecture, generally.** Everything today is single-user/single-household
+  by explicit MVP choice — one `users` row, one Kroger store config, one set of preferences.
+  Real multi-tenancy (multiple independent users/households, each with their own recipes,
+  store, Kroger auth, preferences) is a genuine architecture project, not a small patch:
+  touches the schema (`users`/`recipes`/`jobs`/etc. all need real tenant scoping, not an
+  assumed single row), auth (who's allowed to see/act on what), and every single-slot
+  assumption baked into Phases 1–6 (see the next item).
+- **Device/browser tokens are minted per-surface, not per-user.** Related to the above, but a
+  narrower, concrete symptom of it: using the web app from a browser vs. the iOS
+  Shortcut/PWA currently requires separately minting a device token for each surface
+  (`device_tokens` table, one row per device — see the 2026-07-20 device-token fix in Phase
+  4/architecture history) rather than one identity that just works across surfaces. That
+  device-token fix deliberately only solved "one mint no longer logs out every other device"
+  (real per-device rows instead of a single nullable column) — it did NOT solve "log in once,
+  use anywhere without re-minting," which is really the same underlying gap as full
+  multi-tenancy: there's no real user-identity/session layer yet, just per-device tokens
+  against a single implicit user. A real fix likely wants an actual auth layer (login,
+  session/identity independent of "device") as part of the same multi-tenancy work, not a
+  bolt-on.
+- **"Delete my data" actually deletes everyone's data.** `DELETE /api/account/data`
+  (`src/api/routes/account.ts`) correctly cascades recipes → ingredients/product_matches/
+  cart_runs, plus jobs/`kroger_auth`/preferences — but `recipes` has no `user_id` column at
+  all, so the deletion isn't scoped to a single user in the current single-tenant schema; it
+  wipes recipe data for the whole app. The Privacy screen's wording implies personal-data
+  deletion; real behavior today is closer to "reset the whole app." A sharp, mostly-hidden
+  edge of the same single-tenant schema gap — will need fixing as part of real multi-tenancy,
+  not in isolation (a bolted-on `user_id` check without real tenant scoping elsewhere would
+  be a false sense of safety).
+
+### Testing & CI gaps
+
+- **The web app (React/Vite) has zero automated tests.** No vitest config in `web/`, no
+  `*.test.tsx` files anywhere in `web/src`. All existing test coverage is backend-only —
+  every screen/UI change (styling, new components, wiring) is currently verified by hand,
+  not by any automated check.
+
+### Cost & pricing watch (time-boxed — has a real deadline)
+
+- **Sonnet 5 pricing cliff, 2026-08-31.** The `reconcile` call costs ~$0.046/recipe at
+  introductory pricing ($2/$10 per MTok) — inside the ~$0.05/recipe budget (Spec 2 §2.5) but
+  only ~9% margin. At standard post-introductory pricing ($3/$15 per MTok) it's
+  ~$0.068/recipe, ~36% OVER budget. Needs a decision before the cliff: trim the
+  evidence-per-field payload to cut output tokens, evaluate Haiku 4.5 for this call, or
+  accept the higher price and raise the budget target in Spec 2. See
+  `recipecart-sonnet5-pricing-cliff` memory — the $0.046 figure hasn't been re-benchmarked
+  since Phase 2's prompt grew (confidence bands, conflict records), so re-measure before
+  trusting it still holds.
+
+### Deferred pipeline scope
+
+- **Photo-mode/slideshow support + deeper OCR/vision-escalation hardening.** Reclassified
+  2026-07-19 as non-blocking: most real recipe TikToks put the full ingredient list in the
+  caption, so the `caption_sufficient` gate already covers the common case. The OCR/frame/
+  vision-escalation pipeline exists and works (built in Phase 1/2) but isn't getting further
+  investment. Photo-mode specifically is additionally blocked on yt-dlp only retrieving one
+  cover thumbnail from a slideshow — a real fix means reintroducing Playwright/browser
+  automation, the exact dependency the Kroger pivot eliminated (a product/architecture
+  decision, not a code task). Revisit once real usage shows caption-insufficient/photo-mode
+  volume actually matters.
+- **Exit-gate test video curation** — narrowed to caption-sufficient categories (narration-
+  only, non-recipe, conflicting/vague quantities), not text-only/photo-mode. Two known-good
+  real URLs already in use: `@jalalsamfit/video/7564134038592605462`,
+  `@shreddedandfed/video/7650230773512965393` — reuse these rather than re-finding test
+  videos.
+- **Self-hosted local LLM for `reconcile` instead of Claude.** Investigated and tabled, not
+  rejected (Spec 2 §2.5a, `spikes/ollama-reconcile-spike.ts`, kept runnable): works
+  reasonably on clean caption-only input, but 172s latency (vs. a 60-90s pipeline target) and
+  imprecise evidence citations are real gaps, and it fabricated an entirely wrong recipe on
+  noisy OCR input. Revisit with a vision-capable model and/or GPU-backed hosting.
+
+### Post-MVP feature roadmap (consolidated from all four PRDs)
+
+Not scheduled — revisit after the beta proves the loop: native iOS app with Share Extension
+and APNs push; email digest; unified cross-recipe shopping list; backup-pick
+pre-approval for out-of-stock items; per-ingredient product memory feeding ranking; manual
+transcript-paste fallback; multi-video recipe stitching; evidence-image retention (requires
+object storage); pinned-comment ingestion; repost detection; Redis/BullMQ queue and bounded
+worker concurrency; staging environment; secret-rotation automation; Kroger Partner-tier
+application (removes rate limits, adds cart-read).
+
+---
+
 ## Cross-phase gates: action items that must be resolved before each phase
 
 | Before phase | Must be decided/confirmed (see spec action-item IDs) |
@@ -177,7 +321,3 @@ has a real, computed, passing WCAG AA contrast ratio on record.
 | P3 | Web app framework (A1-1); polling interval (A1-3); Postgres migration approach (A4-2). |
 | P4 | Railway account + plan (A4-3); domain/URL for the web app (A4-4); Shortcut token-provisioning flow (A1-2); OAuth2 redirect URI updated to the production URL. |
 | P5 | Default pantry-staple list (A1-4); beta tester list and what "invite" means operationally. |
-
-## Post-MVP roadmap (consolidated from all four PRDs)
-
-Not scheduled — revisit after the beta proves the loop: **photo-mode/slideshow support and deeper OCR/vision-escalation-path hardening (reclassified 2026-07-19 — see Phase 2 scope above; MVP works from the caption-sufficient assumption, most real recipe videos qualify);** native iOS app with Share Extension and APNs push; email digest; multi-user/household accounts and multi-tenant Kroger tokens; unified cross-recipe shopping list; backup-pick pre-approval for out-of-stock items; per-ingredient product memory feeding ranking; manual transcript-paste fallback; multi-video recipe stitching; evidence-image retention (requires object storage); pinned-comment ingestion; repost detection; Haiku 4.5 evaluation for the reconciliation call; Redis/BullMQ queue and bounded worker concurrency; staging environment; secret-rotation automation; Kroger Partner-tier application (removes rate limits, adds cart-read); **self-hosted local LLM for reconciliation instead of Claude — investigated and tabled (Spec 2 §2.5a), real but partial results (works on the caption-sufficient happy path, too slow on CPU and evidence-citation precision needs work; vision-escalation path untested with a capable model) — revisit with a vision-capable model and/or GPU-backed hosting, not a dead end.**
