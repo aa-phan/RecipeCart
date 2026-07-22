@@ -218,24 +218,28 @@ picked up.
   Kroger auth as part of onboarding. Needs Setup to check connection status and route into
   the Kroger OAuth flow before (or right after) minting a device token — not just wait for a
   failure to surface it.
-- **`POST /api/setup/device-token` is unauthenticated and unthrottled.** Confirmed in-code:
-  `src/api/routes/setup.ts` marks it `skipAuth: true` with a comment already acknowledging
-  this is "acceptable only because this project is currently a single-household MVP beta"
-  and that it needs a real gate "before onboarding any untrusted user." As-is, anyone who
-  finds the URL can mint unlimited device tokens — no rate limiting or abuse protection
-  exists anywhere on the API (no `@fastify/rate-limit` or equivalent). A sharper, more
-  concrete instance of the multi-tenancy/auth gap below, worth tracking on its own since it's
-  exploitable today, not just a future-architecture concern.
 
 ### Architecture: multi-tenancy
 
-- **Multi-tenant architecture, generally.** Everything today is single-user/single-household
-  by explicit MVP choice — one `users` row, one Kroger store config, one set of preferences.
-  Real multi-tenancy (multiple independent users/households, each with their own recipes,
-  store, Kroger auth, preferences) is a genuine architecture project, not a small patch:
-  touches the schema (`users`/`recipes`/`jobs`/etc. all need real tenant scoping, not an
-  assumed single row), auth (who's allowed to see/act on what), and every single-slot
-  assumption baked into Phases 1–6 (see the next item).
+- **Multi-tenant architecture, generally — including closing `POST /api/setup/device-token`'s
+  open mint.** Everything today is single-user/single-household by explicit MVP choice — one
+  `users` row, one Kroger store config, one set of preferences. Real multi-tenancy (multiple
+  independent users/households, each with their own recipes, store, Kroger auth, preferences)
+  is a genuine architecture project, not a small patch: touches the schema (`users`/
+  `recipes`/`jobs`/etc. all need real tenant scoping, not an assumed single row), auth (who's
+  allowed to see/act on what), and every single-slot assumption baked into Phases 1–6 (see the
+  next item). **This is deliberately the fix path for the device-token mint endpoint too**
+  (`src/api/routes/setup.ts` — `skipAuth: true`, no gate at all, its own comment already
+  flags this as needing "an authenticated admin session... before onboarding any untrusted
+  user"): a real per-user auth layer built here supersedes the endpoint's current wide-open
+  state, rather than bolting on a separate shared-passphrase mechanism first and
+  throwing it away once real auth lands. **Known tradeoff, explicit user call (2026-07-21):**
+  until this ships, the endpoint stays genuinely exploitable — anyone who finds the URL can
+  mint a device token with full account access (all recipes/preferences, and cart-approval
+  against the real connected Kroger account). A standalone interim gate (shared setup
+  passphrase) was built, deployed, and verified working, then deliberately reverted
+  (commits `341b25b`/`384f69c`) in favor of doing it once, correctly, here — prioritize this
+  item accordingly, not as a someday-nice-to-have.
 - **Device/browser tokens are minted per-surface, not per-user.** Related to the above, but a
   narrower, concrete symptom of it: using the web app from a browser vs. the iOS
   Shortcut/PWA currently requires separately minting a device token for each surface
