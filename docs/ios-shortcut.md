@@ -28,9 +28,9 @@ is a confirmation within 2 seconds of the share tap (Spec 1 §2.2).
 ## 2. Prerequisites
 
 - **A Shortcut token.** First sign in to the deployed web app with Google
-  (`https://<your-production-domain>/login`) — `/setup` is authenticated-only
-  as of multi-tenancy Slice 1, so this step comes first, not `/setup`
-  itself. Once signed in, visit `/setup` (nav: "Devices") and click
+  (`https://<your-production-domain>/login`) — `/account` is authenticated-only
+  as of multi-tenancy Slice 1, so this step comes first, not `/account`
+  itself. Once signed in, visit `/account` (nav: "Account") and click
   "Generate Shortcut token." This mints a fresh token and displays it once
   for copying. It does NOT sign this browser in or change its own session
   in any way (2026-07-22 re-scoping) — it exists purely to hand a raw
@@ -41,7 +41,8 @@ is a confirmation within 2 seconds of the share tap (Spec 1 §2.2).
   A CLI fallback still exists if you have shell access to the machine
   running the API (`npm run cli -- create-device-token`, or `node
   dist/cli.js create-device-token` against a built image) — same
-  crypto/storage under the hood as `/setup`, just without a browser.
+  crypto/storage under the hood as `/account`'s "Generate Shortcut token"
+  button, just without a browser.
 
   Either way, only the SHA-256 hash is stored server-side — if the token is
   lost, generate a new one.
@@ -113,7 +114,7 @@ and only then continues; every run after that skips the prompt entirely.
      `Device Token` populated and no prompt shown.
    - **Otherwise (first run, or the stored file is missing/empty):**
      a. Add **"Ask for Input"** — Input Type: **Text**, Prompt: **"Paste
-        your RecipeCart device token"** (the value from the `/setup` page,
+        your RecipeCart device token"** (the value from the `/account` page,
         §2 above).
      b. Add **"Set Variable"**, name `Device Token`, value = the text just
         entered in (a).
@@ -265,7 +266,7 @@ anything.
    there is no secret baked into it.
 3. Paste that URL into the `SHORTCUT_ICLOUD_URL` constant in
    `web/src/lib/shortcutConfig.ts` (see the comment there). Once set, the
-   `/setup` web page's "Add Shortcut to your device" button links straight
+   `/account` web page's "Add Shortcut to your device" button links straight
    to it — no more manually sending the link over Messages/AirDrop, though
    that still works too.
 4. Anyone installing it (via the button or a direct link) reviews the
@@ -273,14 +274,17 @@ anything.
    before allowing install), taps **"Add Shortcut,"** and is prompted for
    their token on the very first run per §3.2.
 
-**Still true, and unaffected by this change:** there's currently only one
-device-token "slot" server-side (see §2's `DEFAULT_USER_ID` caveat) — every
-person who pastes a token in step 4 above is still authenticating as the
-same single account, and generating a new token via `/setup` invalidates
-whatever every other household member pasted in. This is a backend
-limitation the token-storage redesign in §3.2 doesn't (and isn't meant to)
-fix; it only removes the *plaintext-token-in-a-shared-file* problem, not
-the *single-account* one.
+**Outdated as of the per-device-token fix (2026-07-20) and multi-tenancy
+(2026-07-21/22) — kept below only as history, not current behavior:** this
+section used to warn that every pasted token authenticated as the same
+single account, and that generating a new one invalidated every other
+household member's. Neither is true anymore: `device_tokens` is a real
+per-device table (minting one no longer invalidates any other), and each
+person can sign in with their own Google account (`/login`) for a fully
+separate account with its own recipes/Kroger connection — "one shared
+household account" is no longer the only option, just still a valid one
+if that's genuinely what you want (everyone paste a token minted from the
+SAME signed-in account's `/account` page).
 
 <details>
 <summary>Superseded: the old baked-in-token distribution caveat (kept for
@@ -361,6 +365,7 @@ Mirrors Spec 1 §7 ("Setup" considerations) and blocker B1-3:
 ## 6. Open questions / things this doc could not confirm from code
 
 - ~~The exact path of the web setup page is not yet decided~~ — resolved:
-  `/setup` is the real, live path (`web/src/screens/Setup/Setup.tsx`),
-  verified working end-to-end against production
-  (`https://recipecart-production.up.railway.app/setup`) on 2026-07-20.
+  `/setup` was the original live path, verified working end-to-end against
+  production on 2026-07-20; renamed to `/account`
+  (`web/src/screens/Account/Account.tsx`) on 2026-07-22 when it merged with
+  identity/sign-out into a real Account screen.

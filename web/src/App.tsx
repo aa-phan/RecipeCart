@@ -69,15 +69,16 @@ const FailureCard = React.lazy(() => import("./screens/FailureCard/FailureCard")
 const ConnectKroger = React.lazy(() => import("./screens/ConnectKroger/ConnectKroger"));
 const Preferences = React.lazy(() => import("./screens/Preferences/Preferences"));
 const Privacy = React.lazy(() => import("./screens/Privacy/Privacy"));
-const Setup = React.lazy(() => import("./screens/Setup/Setup"));
+const Account = React.lazy(() => import("./screens/Account/Account"));
 const Login = React.lazy(() => import("./screens/Login/Login"));
 
 // /login is the one route AuthGate lets an unauthenticated visitor reach
 // (see auth/AuthGate.tsx UNGATED_PATHS, multi-tenancy Slice 1 2026-07-21)
 // — nav chrome pointing at authed-only routes (Preferences, Privacy, Home)
-// would just be dead ends there. /setup is now authenticated-only (adding
-// an additional device), so every other route — including /setup — already
-// implies a signed-in session and gets the shell.
+// would just be dead ends there. /account is authenticated-only (identity,
+// sign-out, and adding an additional Shortcut device), so every other
+// route — including /account — already implies a signed-in session and
+// gets the shell.
 const SHELL_LESS_PATHS = new Set(["/login"]);
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -103,7 +104,7 @@ export default function App() {
             <Route path="/connect-kroger" element={<ConnectKroger />} />
             <Route path="/preferences" element={<Preferences />} />
             <Route path="/privacy" element={<Privacy />} />
-            <Route path="/setup" element={<Setup />} />
+            <Route path="/account" element={<Account />} />
             <Route path="/login" element={<Login />} />
           </Routes>
         </Suspense>

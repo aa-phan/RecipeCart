@@ -109,6 +109,13 @@ export interface MatchEditRequest {
   selectedProductId?: string | null;
 }
 
+// ── Account (2026-07-22) ────────────────────────────────────────────────
+
+export interface AccountDto {
+  email: string | null;
+  name: string | null;
+}
+
 // ── Devices ─────────────────────────────────────────────────────────────
 
 export interface DeviceDto {

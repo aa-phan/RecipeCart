@@ -11,7 +11,7 @@
 // who taps it is prompted for their own token on their own first run.
 //
 // Once someone builds that Shortcut and copies its iCloud link, paste it
-// here to activate the "Add Shortcut to your device" button on /setup.
+// here to activate the "Add Shortcut to your device" button on /account.
 // Leave empty to keep that button hidden/disabled.
 //
 // Set 2026-07-20: real link for the built-and-verified Shortcut (first-run

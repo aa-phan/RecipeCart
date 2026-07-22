@@ -2,11 +2,12 @@ import { useSearchParams } from "react-router-dom";
 import "./Login.css";
 
 // Sign-in screen (multi-tenancy Slice 1, 2026-07-21) — replaces the old
-// unauthenticated "generate a device token" front door
-// (screens/Setup/Setup.tsx) that was the original open-mint vulnerability.
-// AuthGate now sends any genuinely unauthenticated visitor here instead of
-// /setup; /setup is authenticated-only from here on (adding an ADDITIONAL
-// device, e.g. the iOS Shortcut, once already signed in).
+// unauthenticated "generate a device token" front door (originally
+// screens/Setup/Setup.tsx, since renamed to screens/Account/Account.tsx)
+// that was the original open-mint vulnerability. AuthGate now sends any
+// genuinely unauthenticated visitor here instead; /account is
+// authenticated-only from here on (identity, sign-out, and adding an
+// ADDITIONAL device, e.g. the iOS Shortcut, once already signed in).
 //
 // The Google button is a plain `<a>` doing a full browser navigation (NOT a
 // fetch/XHR) — same reasoning as ConnectKroger.tsx: OAuth redirects need

@@ -3,16 +3,18 @@ import { Navigate, useLocation } from "react-router-dom";
 
 // Purely client-side "has this browser completed sign-in" marker. Genuine
 // auth is the HttpOnly cookie set server-side (JS can't read it back out to
-// check, by design), so this flag is what AuthGate checks instead — set by
-// google_auth.ts's callback (via a full-page redirect landing on `/`) for a
-// fresh sign-in, or by Setup.tsx after minting an additional device token.
+// check, by design), so this flag is what AuthGate checks instead — set
+// synchronously by isAuthed() below when `?loggedIn=true` lands after
+// google_auth.ts's OAuth callback, and cleared by Account.tsx's sign-out
+// action / a stale-token 401 (api/client.ts).
 export const AUTHED_FLAG_KEY = "recipecart_authed";
 
 // Routes reachable before a device token exists. /login is where a
 // genuinely unauthenticated visitor signs in (multi-tenancy Slice 1,
-// 2026-07-21 — replaces the old unauthenticated /setup mint). /setup
-// itself is now authenticated-only (adding an ADDITIONAL device once
-// already signed in), so it's deliberately NOT in this set anymore.
+// 2026-07-21 — replaces the old unauthenticated /setup mint, since renamed
+// to /account). /account itself is authenticated-only (identity, sign-out,
+// adding an ADDITIONAL device once already signed in), so it's
+// deliberately NOT in this set.
 const UNGATED_PATHS = new Set(["/login"]);
 
 function isAuthed(): boolean {

@@ -112,6 +112,37 @@ describe("account routes", () => {
     app = await buildServer();
   });
 
+  it("GET /account returns the calling user's own email/name", async () => {
+    await getDb()
+      .updateTable("users")
+      .set({ email: "owner@example.com", name: "Owner" })
+      .where("id", "=", DEFAULT_USER_ID)
+      .execute();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/account",
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ email: "owner@example.com", name: "Owner" });
+  });
+
+  it("GET /account returns nulls for an account with no Google identity yet", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/account",
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ email: null, name: null });
+  });
+
+  it("GET /account rejects requests without a valid device token", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/account" });
+    expect(res.statusCode).toBe(401);
+  });
+
   it("wipes recipes, jobs, kroger_auth, and preferences but keeps the user", async () => {
     const db = getDb();
     await db

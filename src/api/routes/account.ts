@@ -1,5 +1,6 @@
-// Account data-wipe route (Phase 3 REST API, B4). DELETE /account/data does
-// a full wipe of the authenticated user's data — recipes/ingredients/
+// Account routes (Phase 3 REST API, B4; GET added 2026-07-22 for the
+// Account screen's "signed in as" line). DELETE /account/data does a full
+// wipe of the authenticated user's data — recipes/ingredients/
 // product_matches/cart_runs (via cascade), jobs, kroger_auth, and
 // preferences — but leaves the `users` row itself intact (the account
 // stays registered, just wiped).
@@ -14,8 +15,22 @@
 // subquery through jobs.user_id.
 import type { FastifyInstance } from "fastify";
 import { getDb } from "../../platform/database.js";
+import { notFound } from "../lib/errors.js";
+import type { AccountDto } from "../lib/dto.js";
 
 export default async function accountRoutes(app: FastifyInstance): Promise<void> {
+  // GET /account — the calling user's own identity (email/name from their
+  // Google sign-in). Used by the Account screen to show "Signed in as X".
+  app.get("/account", async (request): Promise<AccountDto> => {
+    const user = await getDb()
+      .selectFrom("users")
+      .select(["email", "name"])
+      .where("id", "=", request.userId)
+      .executeTakeFirst();
+    if (!user) throw notFound("account");
+    return { email: user.email, name: user.name };
+  });
+
   app.delete("/account/data", async (request, reply) => {
     await getDb().transaction().execute(async (trx) => {
       // recipes cascades to ingredients -> product_matches, and to cart_runs

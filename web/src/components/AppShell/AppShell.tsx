@@ -1,7 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
-import { apiPost } from "../../api/client";
-import { AUTHED_FLAG_KEY } from "../../auth/AuthGate";
+import type { ReactNode } from "react";
+import { NavLink } from "react-router-dom";
 import "./AppShell.css";
 
 // Global nav chrome (Phase 5 Slice 5). Before this, /preferences and
@@ -13,39 +11,22 @@ import "./AppShell.css";
 // Rendered INSIDE AuthGate (see App.tsx), so by the time this mounts the
 // visitor is authed — the one ungated route AuthGate lets an unauthenticated
 // visitor reach, /login (multi-tenancy Slice 1, 2026-07-21), never renders
-// this component at all (App.tsx's Shell wrapper skips it there). /setup is
-// authenticated-only as of that same slice, so it's a normal nav
+// this component at all (App.tsx's Shell wrapper skips it there). /account
+// is authenticated-only as of that same slice, so it's a normal nav
 // destination now, not a special case needing its own hidden-nav treatment.
+//
+// Sign-out USED to live here as a nav button (2026-07-22) — real bug, caught
+// live: on an iPhone 15, the horizontal nav bar had no room for it and it
+// ran off the edge of the screen, unreachable. Moved to screens/Account/
+// Account.tsx (its own dedicated section, not squeezed into a single-row
+// nav) rather than trying to cram it in here more cleverly — a "sign out"
+// action deserves a real screen, not a button fighting for space in a
+// global header that has to work down to a phone-width viewport.
 export interface AppShellProps {
   children: ReactNode;
 }
 
 export default function AppShell({ children }: AppShellProps) {
-  const navigate = useNavigate();
-  const [signingOut, setSigningOut] = useState(false);
-
-  // Sign-out (2026-07-22 — a real gap found live: nothing anywhere in the
-  // app let you end your own session). POST /api/auth/signout revokes THIS
-  // session's device_tokens row and clears the cookie server-side; this
-  // just needs to also drop the client-side AUTHED_FLAG_KEY AuthGate reads
-  // and navigate to /login, mirroring how a stale-token 401 already
-  // self-heals in api/client.ts.
-  const handleSignOut = async () => {
-    setSigningOut(true);
-    try {
-      await apiPost("/api/auth/signout");
-    } catch {
-      // Whatever the failure (already-dead session, network blip — a 401
-      // here already triggers client.ts's own redirect-to-/login handling)
-      // — the user's intent is to leave regardless, so fall through to the
-      // local sign-out below rather than stranding them on a broken button.
-    } finally {
-      localStorage.removeItem(AUTHED_FLAG_KEY);
-      setSigningOut(false);
-      navigate("/login", { replace: true });
-    }
-  };
-
   return (
     <div className="app-shell">
       <header className="app-shell__header">
@@ -71,21 +52,13 @@ export default function AppShell({ children }: AppShellProps) {
             Privacy
           </NavLink>
           <NavLink
-            to="/setup"
+            to="/account"
             className={({ isActive }) =>
               isActive ? "app-shell__link app-shell__link--active" : "app-shell__link"
             }
           >
-            Devices
+            Account
           </NavLink>
-          <button
-            type="button"
-            onClick={handleSignOut}
-            disabled={signingOut}
-            className="app-shell__link app-shell__signout"
-          >
-            {signingOut ? "Signing out…" : "Sign out"}
-          </button>
         </nav>
       </header>
       <div className="app-shell__content">{children}</div>

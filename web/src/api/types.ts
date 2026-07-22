@@ -21,4 +21,5 @@ export type {
   CartItemResult,
   CartRunStatus,
   DeviceDto,
+  AccountDto,
 } from "../../../src/api/lib/dto.js";
